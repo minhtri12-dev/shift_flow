@@ -1,7 +1,9 @@
 'use client'
 
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -125,6 +127,440 @@ const paths: Record<IconName, ReactNode> = {
   ),
 }
 
+// ============================================================================
+// KIỂU DỮ LIỆU CƠ SỞ DỮ LIỆU (snake_case) & GIAO DIỆN (camelCase)
+// ============================================================================
+
+type ShiftRow = {
+  id: number
+  name: string
+  start_time: string
+  end_time: string
+  count: number | null
+  status: string | null
+  icon: string | null
+  created_at?: string
+}
+
+type Shift = {
+  id: number
+  name: string
+  start: string
+  end: string
+  count: number
+  status: string
+  icon: IconName
+  createdAt?: string
+}
+
+type EmployeeRow = {
+  id: number
+  code: string
+  name: string
+  initials: string
+  email: string
+  role: string
+  department: string
+  shift: string | null
+  status: string | null
+  tone: string | null
+  created_at?: string
+}
+
+type Employee = {
+  id: number
+  code: string
+  name: string
+  initials: string
+  email: string
+  role: string
+  department: string
+  shift: string
+  status: string
+  tone: string
+  createdAt?: string
+}
+
+type DepartmentRow = {
+  id: number
+  name: string
+  manager: string | null
+  headcount: number | null
+  attendance_rate: number | string | null
+  active_shifts: string | null
+  tone: string | null
+  created_at?: string
+}
+
+type Department = {
+  id: number
+  name: string
+  manager: string
+  headcount: number
+  attendanceRate: number
+  activeShifts: string
+  tone: string
+  createdAt?: string
+}
+
+type AttendanceRow = {
+  id: number
+  employee_id: number | null
+  shift_id: number | null
+  name: string
+  initials: string
+  department: string
+  shift: string
+  work_date: string | null
+  check_in: string | null
+  check_out: string | null
+  break_minutes: number | null
+  total_minutes: number | null
+  total_hours: string | null
+  status: string | null
+  tone: string | null
+  created_at?: string
+}
+
+type AttendanceRecord = {
+  id: number
+  employeeId: number | null
+  shiftId: number | null
+  name: string
+  initials: string
+  department: string
+  shift: string
+  workDate: string
+  checkIn: string
+  checkOut: string | null
+  breakMinutes: number
+  totalMinutes: number
+  totalHours: string
+  status: string
+  tone: string
+  createdAt?: string
+}
+
+type LeaveRequestRow = {
+  id: number
+  employee_id: number | null
+  name: string
+  initials: string
+  department: string
+  type: string
+  reason: string | null
+  date_range: string
+  days_count: string
+  tone: string | null
+  status: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+type LeaveRequest = {
+  id: number
+  employeeId: number | null
+  name: string
+  initials: string
+  department: string
+  type: string
+  reason: string
+  date: string
+  days: string
+  tone: string
+  status: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+type WorkspaceSettingsRow = {
+  id: number
+  workspace_name: string
+  timezone: string
+  max_late_minutes: number
+  notify_leave_email: boolean
+  alert_late_threshold: boolean
+  updated_at?: string
+}
+
+type WorkspaceSettings = {
+  workspaceName: string
+  timezone: string
+  maxLateMinutes: number
+  notifyLeaveEmail: boolean
+  alertLateThreshold: boolean
+  updatedAt?: string
+}
+
+type ActivityItem = {
+  id: string
+  icon: IconName
+  tone: 'teal' | 'orange' | 'blue'
+  name: string
+  text: string
+  detail: string
+  timestamp: string
+}
+
+type CalendarDaySlot = {
+  isoDate: string
+  dayLabel: string
+  dateLabel: string
+  isToday: boolean
+}
+
+// ============================================================================
+// HÀM TIỆN ÍCH THUẦN KHIẾT (KHÔNG GỌI new Date() MẶC ĐỊNH KHI PRERENDER)
+// ============================================================================
+
+function formatDateToIso(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatDateToHHMM(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function formatShortDate(isoDate: string): string {
+  if (!isoDate) return '--/--'
+  const parts = isoDate.split('-')
+  if (parts.length !== 3) return isoDate
+  return `${parts[2]}/${parts[1]}`
+}
+
+function getDayOfWeekLabel(date: Date): string {
+  const day = date.getDay()
+  return day === 0 ? 'CN' : `T${day + 1}`
+}
+
+function parseTimeToMinutes(timeStr: string | null | undefined): number | null {
+  if (!timeStr || !/^\d{1,2}:\d{2}$/.test(timeStr.trim())) return null
+  const [h, m] = timeStr.trim().split(':').map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return null
+  }
+  return h * 60 + m
+}
+
+function formatMinutesToHoursText(totalMinutes: number): string {
+  const safeMins = Math.max(0, Math.round(totalMinutes))
+  const hours = Math.floor(safeMins / 60)
+  const mins = safeMins % 60
+  return `${hours}h ${String(mins).padStart(2, '0')}m`
+}
+
+function computeWorkedMinutes(
+  checkIn: string,
+  checkOut: string,
+  breakMinutes = 0,
+  allowOvernight = false,
+): { valid: boolean; totalMinutes: number; error?: string } {
+  const inMins = parseTimeToMinutes(checkIn)
+  const outMins = parseTimeToMinutes(checkOut)
+
+  if (inMins === null || outMins === null) {
+    return { valid: false, totalMinutes: 0, error: 'Định dạng giờ không hợp lệ.' }
+  }
+
+  let rawDiff = outMins - inMins
+  if (rawDiff < 0 && allowOvernight) {
+    rawDiff += 24 * 60
+  }
+
+  if (rawDiff <= 0) {
+    return {
+      valid: false,
+      totalMinutes: 0,
+      error:
+        'Giờ tan ca phải sau giờ vào ca (nếu là ca qua đêm, vui lòng bật tùy chọn Ca qua ngày).',
+    }
+  }
+
+  if (breakMinutes < 0 || breakMinutes >= rawDiff) {
+    return {
+      valid: false,
+      totalMinutes: 0,
+      error: 'Thời gian nghỉ giữa giờ không được lớn hơn hoặc bằng tổng thời gian ca.',
+    }
+  }
+
+  return {
+    valid: true,
+    totalMinutes: rawDiff - breakMinutes,
+  }
+}
+
+function computeInitials(fullName: string): string {
+  const words = fullName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (words.length === 0) return 'NV'
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
+  return `${words[words.length - 2][0]}${words[words.length - 1][0]}`.toUpperCase()
+}
+
+function formatRelativeTime(isoTimestamp: string, nowMs: number): string {
+  if (!isoTimestamp || !nowMs) return 'Gần đây'
+  const time = Date.parse(isoTimestamp)
+  if (Number.isNaN(time)) return 'Gần đây'
+  const diffSeconds = Math.floor((nowMs - time) / 1000)
+  if (diffSeconds < 60) return 'Vừa xong'
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  if (diffMinutes < 60) return `${diffMinutes} phút trước`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours} giờ trước`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays <= 7) return `${diffDays} ngày trước`
+  return isoTimestamp.slice(0, 10).split('-').reverse().join('/')
+}
+
+function escapeCsvCell(value: unknown): string {
+  const str = value === null || value === undefined ? '' : String(value)
+  if (/[",\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`
+  }
+  return str
+}
+
+function mapShiftRow(row: ShiftRow): Shift {
+  const validIcons: IconName[] = ['sun', 'moon', 'clock']
+  const iconName = validIcons.includes(row.icon as IconName)
+    ? (row.icon as IconName)
+    : 'clock'
+  return {
+    id: row.id,
+    name: row.name,
+    start: row.start_time || '08:00',
+    end: row.end_time || '12:00',
+    count: Number(row.count ?? 0),
+    status: row.status || 'Sắp bắt đầu',
+    icon: iconName,
+    createdAt: row.created_at,
+  }
+}
+
+function mapEmployeeRow(row: EmployeeRow): Employee {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    initials: row.initials || computeInitials(row.name),
+    email: row.email,
+    role: row.role,
+    department: row.department,
+    shift: row.shift || 'Ca sáng',
+    status: row.status || 'Đang hoạt động',
+    tone: row.tone || 'teal',
+    createdAt: row.created_at,
+  }
+}
+
+function mapDepartmentRow(row: DepartmentRow): Department {
+  const parsedRate = Number(row.attendance_rate ?? 0)
+  return {
+    id: row.id,
+    name: row.name,
+    manager: row.manager || 'Chưa bổ nhiệm',
+    headcount: Number(row.headcount ?? 0),
+    attendanceRate: Number.isFinite(parsedRate) ? parsedRate : 0,
+    activeShifts: row.active_shifts || 'Chưa phân ca',
+    tone: row.tone || 'teal',
+    createdAt: row.created_at,
+  }
+}
+
+function mapAttendanceRow(
+  row: AttendanceRow,
+  fallbackTodayIso: string,
+): AttendanceRecord {
+  const fallbackDate = row.created_at
+    ? row.created_at.slice(0, 10)
+    : fallbackTodayIso
+  const rawCheckOut =
+    row.check_out && row.check_out !== '--:--' ? row.check_out : null
+  const breakMins = Number(row.break_minutes ?? 0)
+
+  let totalMins = Number(row.total_minutes ?? 0)
+  if (totalMins === 0 && row.check_in && rawCheckOut) {
+    const computed = computeWorkedMinutes(
+      row.check_in,
+      rawCheckOut,
+      breakMins,
+      true,
+    )
+    if (computed.valid) {
+      totalMins = computed.totalMinutes
+    }
+  }
+
+  const totalHoursText =
+    row.status === 'Vắng mặt'
+      ? '0h 00m'
+      : rawCheckOut
+        ? totalMins > 0
+          ? formatMinutesToHoursText(totalMins)
+          : row.total_hours || '0h 00m'
+        : 'Đang trong ca'
+
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    shiftId: row.shift_id,
+    name: row.name,
+    initials: row.initials || computeInitials(row.name),
+    department: row.department,
+    shift: row.shift,
+    workDate: row.work_date || fallbackDate,
+    checkIn: row.check_in || '--:--',
+    checkOut: rawCheckOut,
+    breakMinutes: breakMins,
+    totalMinutes: totalMins,
+    totalHours: totalHoursText,
+    status: row.status || 'Đúng giờ',
+    tone: row.tone || 'teal',
+    createdAt: row.created_at,
+  }
+}
+
+function mapLeaveRequestRow(row: LeaveRequestRow): LeaveRequest {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    name: row.name,
+    initials: row.initials || computeInitials(row.name),
+    department: row.department,
+    type: row.type,
+    reason: row.reason || 'Không có ghi chú',
+    date: row.date_range,
+    days: row.days_count,
+    tone: row.tone || 'teal',
+    status: row.status || 'Chờ duyệt',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapSettingsRow(row: WorkspaceSettingsRow): WorkspaceSettings {
+  return {
+    workspaceName: row.workspace_name || 'ShiftFlow Enterprise Workspace',
+    timezone: row.timezone || 'Asia/Ho_Chi_Minh (GMT+7)',
+    maxLateMinutes: Number(row.max_late_minutes ?? 10),
+    notifyLeaveEmail: Boolean(row.notify_leave_email),
+    alertLateThreshold: Boolean(row.alert_late_threshold),
+    updatedAt: row.updated_at,
+  }
+}
+
+// ============================================================================
+// CÁC COMPONENT GIAO DIỆN DÙNG CHUNG
+// ============================================================================
+
 function ShiftFlowMark({ className = '' }: { className?: string }) {
   return (
     <svg
@@ -185,154 +621,6 @@ const navigation: { label: string; icon: IconName }[] = [
   { label: 'Chấm công', icon: 'check' },
   { label: 'Đơn nghỉ phép', icon: 'file' },
   { label: 'Báo cáo', icon: 'chart' },
-]
-
-const sampleAttendance = [
-  { day: 'T2', date: '12/10', onTime: 22, late: 1, absent: 1 },
-  { day: 'T3', date: '13/10', onTime: 21, late: 2, absent: 1 },
-  { day: 'T4', date: '14/10', onTime: 23, late: 1, absent: 0 },
-  { day: 'T5', date: '15/10', onTime: 20, late: 2, absent: 2 },
-  { day: 'T6', date: '16/10', onTime: 22, late: 1, absent: 1 },
-  { day: 'T7', date: '17/10', onTime: 18, late: 1, absent: 1 },
-  { day: 'CN', date: '18/10', onTime: 21, late: 1, absent: 2 },
-]
-
-type Shift = {
-  id?: number
-  name: string
-  start_time?: string
-  end_time?: string
-  start?: string
-  end?: string
-  count: number
-  status: string
-  icon: IconName
-}
-
-type Employee = {
-  id: number
-  code: string
-  name: string
-  initials: string
-  email: string
-  role: string
-  department: string
-  shift: string
-  status: string
-  tone: string
-}
-
-type Department = {
-  id: number
-  name: string
-  manager: string
-  headcount: number
-  attendanceRate: number
-  activeShifts: string
-  tone: string
-}
-
-type AttendanceRecord = {
-  id: number
-  name: string
-  initials: string
-  department: string
-  shift: string
-  checkIn: string
-  checkOut: string
-  totalHours: string
-  status: string
-  tone: string
-}
-
-type LeaveRequest = {
-  id: number
-  name: string
-  initials: string
-  department: string
-  type: string
-  reason: string
-  date_range?: string
-  date?: string
-  days_count?: string
-  days?: string
-  tone: string
-  status: string
-}
-
-const initialAttendanceLogs: AttendanceRecord[] = [
-  {
-    id: 1,
-    name: 'Phạm Đức Long',
-    initials: 'ĐL',
-    department: 'Phòng Vận hành',
-    shift: 'Ca sáng',
-    checkIn: '07:55',
-    checkOut: '12:02',
-    totalHours: '4h 07m',
-    status: 'Đúng giờ',
-    tone: 'peach',
-  },
-  {
-    id: 2,
-    name: 'Lê Quốc Bảo Ân',
-    initials: 'BA',
-    department: 'Phòng Kỹ thuật',
-    shift: 'Ca sáng',
-    checkIn: '07:58',
-    checkOut: '12:00',
-    totalHours: '4h 02m',
-    status: 'Đúng giờ',
-    tone: 'lavender',
-  },
-  {
-    id: 3,
-    name: 'Nguyễn Quốc Huy',
-    initials: 'QH',
-    department: 'Phòng Marketing',
-    shift: 'Ca sáng',
-    checkIn: '08:17',
-    checkOut: '12:10',
-    totalHours: '3h 53m',
-    status: 'Đi trễ',
-    tone: 'peach',
-  },
-  {
-    id: 4,
-    name: 'Lê Thu Hà',
-    initials: 'TH',
-    department: 'Phòng Nhân sự',
-    shift: 'Ca chiều',
-    checkIn: '12:56',
-    checkOut: '17:05',
-    totalHours: '4h 09m',
-    status: 'Đúng giờ',
-    tone: 'mint',
-  },
-  {
-    id: 5,
-    name: 'Nguyễn Minh Trí',
-    initials: 'MT',
-    department: 'Phòng Kỹ thuật',
-    shift: 'Ca chiều',
-    checkIn: '13:00',
-    checkOut: '17:01',
-    totalHours: '4h 01m',
-    status: 'Đúng giờ',
-    tone: 'mint',
-  },
-  {
-    id: 6,
-    name: 'Võ Hoàng Yến',
-    initials: 'HY',
-    department: 'Phòng Kinh doanh',
-    shift: 'Ca tối',
-    checkIn: '--:--',
-    checkOut: '--:--',
-    totalHours: '0h 00m',
-    status: 'Vắng mặt',
-    tone: 'lavender',
-  },
 ]
 
 function Avatar({
@@ -400,36 +688,26 @@ function Modal({
   )
 }
 
-function ActivityFeed() {
+function ActivityFeedList({
+  items,
+  nowMs,
+}: {
+  items: ActivityItem[]
+  nowMs: number
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="table-note" style={{ marginTop: 12 }}>
+        <Icon name="clock" />
+        Chưa có hoạt động nào được ghi nhận trong hệ thống.
+      </div>
+    )
+  }
+
   return (
     <div className="activity-feed">
-      {[
-        {
-          icon: 'check' as IconName,
-          tone: 'teal',
-          name: 'Phạm Đức Long',
-          text: 'vừa chấm công vào ca.',
-          time: '5 phút trước',
-          detail: 'Ca sáng · 07:55',
-        },
-        {
-          icon: 'file' as IconName,
-          tone: 'orange',
-          name: 'Nguyễn Quốc Huy',
-          text: 'gửi đơn xin nghỉ phép.',
-          time: '18 phút trước',
-          detail: 'Nghỉ phép năm · 2 ngày',
-        },
-        {
-          icon: 'calendar' as IconName,
-          tone: 'blue',
-          name: 'Lịch làm việc tuần tới',
-          text: 'đã được xuất bản.',
-          time: '42 phút trước',
-          detail: 'Cập nhật bởi Quản trị viên',
-        },
-      ].map((a) => (
-        <div className="activity-item" key={a.name}>
+      {items.map((a) => (
+        <div className="activity-item" key={a.id}>
           <span className={`activity-icon ${a.tone}`}>
             <Icon name={a.icon} />
           </span>
@@ -438,7 +716,7 @@ function ActivityFeed() {
               <strong>{a.name}</strong> {a.text}
             </p>
             <span>{a.detail}</span>
-            <small>{a.time}</small>
+            <small>{formatRelativeTime(a.timestamp, nowMs)}</small>
           </div>
         </div>
       ))}
@@ -451,119 +729,291 @@ const periodOptions = [
   { value: 'previous', label: '7 ngày trước' },
 ]
 
+// ============================================================================
+// TRANG DASHBOARD CHÍNH
+// ============================================================================
+
 export default function DashboardPage() {
   const [drawer, setDrawer] = useState(false)
   const [active, setActive] = useState('Tổng quan')
   const [modal, setModal] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Dữ liệu thực tế từ Supabase
   const [shifts, setShifts] = useState<Shift[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
-  const [attendanceLogs, setAttendanceLogs] = useState(initialAttendanceLogs)
+  const [attendanceLogs, setAttendanceLogs] = useState<AttendanceRecord[]>([])
   const [requests, setRequests] = useState<LeaveRequest[]>([])
+
+  // Cài đặt hệ thống lưu trữ trên Supabase
+  const [settings, setSettings] = useState<WorkspaceSettings>({
+    workspaceName: 'ShiftFlow Enterprise Workspace',
+    timezone: 'Asia/Ho_Chi_Minh (GMT+7)',
+    maxLateMinutes: 10,
+    notifyLeaveEmail: true,
+    alertLateThreshold: true,
+  })
+
+  // Trạng thái thời gian thực (Chỉ khởi tạo trong useEffect để tương thích Prerender)
+  const [todayIso, setTodayIso] = useState<string>('')
+  const [nowMs, setNowMs] = useState<number>(0)
+  const [defaultTimeHHMM, setDefaultTimeHHMM] = useState<string>('08:00')
+  const [currentDateString, setCurrentDateString] = useState<string>('')
+  const [recent7Days, setRecent7Days] = useState<CalendarDaySlot[]>([])
+  const [previous7Days, setPrevious7Days] = useState<CalendarDaySlot[]>([])
+
+  // Trạng thái điều khiển Modal & Bộ lọc
   const [review, setReview] = useState<number | null>(null)
+  const [checkoutTarget, setCheckoutTarget] = useState<AttendanceRecord | null>(
+    null,
+  )
+  const [selectedCheckInEmpId, setSelectedCheckInEmpId] = useState<string>('')
+  const [selectedCheckInShift, setSelectedCheckInShift] =
+    useState<string>('Ca sáng')
   const [period, setPeriod] = useState('week')
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [empSearch, setEmpSearch] = useState('')
   const [empDeptFilter, setEmpDeptFilter] = useState('Tất cả')
   const [attFilter, setAttFilter] = useState('Tất cả')
+  const [attDateFilter, setAttDateFilter] = useState<string>('')
   const [leaveFilter, setLeaveFilter] = useState('Tất cả')
-  const [userEmail, setUserEmail] = useState('minhtri@shiftflow.com')
-  const [currentDateString, setCurrentDateString] = useState('')
+
+  // Thông tin người dùng & Phân quyền thực tế
+  const [userEmail, setUserEmail] = useState('')
+  const [userName, setUserName] = useState('Nguyễn Minh Trí')
+  const [userRole, setUserRole] = useState<'admin' | 'manager' | 'employee'>(
+    'admin',
+  )
 
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const isAdmin = userRole === 'admin' || userRole === 'manager'
 
-  // Hàm tải dữ liệu toàn diện từ Supabase
-  const fetchSupabaseData = async () => {
-    const supabase = createClient()
+  // Hàm tải toàn bộ dữ liệu thực tế từ Supabase
+  const fetchSupabaseData = useCallback(
+    async (showSpinner = false, fallbackIso = '') => {
+      if (showSpinner) setIsLoading(true)
+      setFetchError(null)
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (user?.email) {
-      setUserEmail(user.email)
-    }
+      try {
+        const supabase = createClient()
 
-    const { data: empData } = await supabase.from('employees').select('*')
-    if (empData) setEmployees(empData)
+        const {
+          data: { user },
+          error: authErr,
+        } = await supabase.auth.getUser()
 
-    const { data: deptData } = await supabase.from('departments').select('*')
-    if (deptData) setDepartments(deptData)
+        if (authErr) {
+          setFetchError(
+            'Không thể xác thực phiên đăng nhập. Vui lòng đăng nhập lại.',
+          )
+          setIsLoading(false)
+          return
+        }
 
-    const { data: shiftData } = await supabase.from('shifts').select('*')
-    if (shiftData) {
-      setShifts(
-        shiftData.map((s) => ({
-          ...s,
-          start: s.start_time || s.start || '08:00',
-          end: s.end_time || s.end || '12:00',
-        })),
-      )
-    }
+        if (user) {
+          const email = user.email || ''
+          setUserEmail(email)
 
-    const { data: leaveData } = await supabase.from('leave_requests').select('*')
-    if (leaveData) {
-      setRequests(
-        leaveData.map((r) => ({
-          ...r,
-          date: r.date_range || r.date || '16/10',
-          days: r.days_count || r.days || '1 ngày',
-        })),
-      )
-    }
-  }
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('full_name, role')
+            .eq('id', user.id)
+            .maybeSingle()
 
-  // Khởi tạo dữ liệu và Đăng ký Realtime Subscriptions
+          if (profileData) {
+            if (
+              profileData.full_name &&
+              profileData.full_name !== 'New User'
+            ) {
+              setUserName(profileData.full_name)
+            }
+            const rawRole = String(profileData.role || '').toLowerCase()
+            if (
+              rawRole === 'admin' ||
+              rawRole === 'manager' ||
+              ['admin@shiftflow.com', 'minhtri@shiftflow.com'].includes(
+                email.toLowerCase(),
+              )
+            ) {
+              setUserRole(rawRole === 'manager' ? 'manager' : 'admin')
+            } else {
+              setUserRole('employee')
+            }
+          }
+        }
+
+        const [empRes, deptRes, shiftRes, attRes, leaveRes, settingsRes] =
+          await Promise.all([
+            supabase
+              .from('employees')
+              .select('*')
+              .order('id', { ascending: true }),
+            supabase
+              .from('departments')
+              .select('*')
+              .order('id', { ascending: true }),
+            supabase
+              .from('shifts')
+              .select('*')
+              .order('id', { ascending: true }),
+            supabase
+              .from('attendance_records')
+              .select('*')
+              .order('work_date', { ascending: false })
+              .order('id', { ascending: false }),
+            supabase
+              .from('leave_requests')
+              .select('*')
+              .order('id', { ascending: false }),
+            supabase
+              .from('workspace_settings')
+              .select('*')
+              .eq('id', 1)
+              .maybeSingle(),
+          ])
+
+        const errors: string[] = []
+        if (empRes.error) errors.push(`Nhân viên (${empRes.error.message})`)
+        if (deptRes.error) errors.push(`Phòng ban (${deptRes.error.message})`)
+        if (shiftRes.error) errors.push(`Ca làm (${shiftRes.error.message})`)
+        if (attRes.error) errors.push(`Chấm công (${attRes.error.message})`)
+        if (leaveRes.error) errors.push(`Nghỉ phép (${leaveRes.error.message})`)
+
+        if (errors.length > 0) {
+          setFetchError(
+            `Không thể tải một số dữ liệu: ${errors.join(', ')}. Hãy đảm bảo bạn đã chạy bản Migration Phase 1 trên Supabase.`,
+          )
+        }
+
+        if (empRes.data) {
+          setEmployees((empRes.data as EmployeeRow[]).map(mapEmployeeRow))
+        }
+
+        if (deptRes.data) {
+          setDepartments(
+            (deptRes.data as DepartmentRow[]).map(mapDepartmentRow),
+          )
+        }
+
+        if (shiftRes.data) {
+          setShifts((shiftRes.data as ShiftRow[]).map(mapShiftRow))
+        }
+
+        if (attRes.data) {
+          setAttendanceLogs(
+            (attRes.data as AttendanceRow[]).map((row) =>
+              mapAttendanceRow(row, fallbackIso),
+            ),
+          )
+        }
+
+        if (leaveRes.data) {
+          setRequests(
+            (leaveRes.data as LeaveRequestRow[]).map(mapLeaveRequestRow),
+          )
+        }
+
+        if (settingsRes.data && !settingsRes.error) {
+          setSettings(mapSettingsRow(settingsRes.data as WorkspaceSettingsRow))
+        }
+      } catch {
+        setFetchError(
+          'Đã xảy ra lỗi kết nối mạng khi truy vấn dữ liệu từ Supabase.',
+        )
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [],
+  )
+
+  // Khởi tạo thời gian thực, dữ liệu & đăng ký lắng nghe Realtime
   useEffect(() => {
-    fetchSupabaseData()
-
-    const supabase = createClient()
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'employees' },
-        () => fetchSupabaseData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'departments' },
-        () => fetchSupabaseData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'shifts' },
-        () => fetchSupabaseData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'leave_requests' },
-        () => {
-          fetchSupabaseData()
-          setNotice('Cập nhật trạng thái đơn nghỉ phép thời gian thực!')
-        },
-      )
-      .subscribe()
-
     const now = new Date()
-    const formatted = new Intl.DateTimeFormat('vi-VN', {
+    const currentIso = formatDateToIso(now)
+    setTodayIso(currentIso)
+    setNowMs(now.getTime())
+    setDefaultTimeHHMM(formatDateToHHMM(now))
+
+    const formattedDate = new Intl.DateTimeFormat('vi-VN', {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
       year: 'numeric',
     }).format(now)
-    setCurrentDateString(formatted.charAt(0).toUpperCase() + formatted.slice(1))
+    setCurrentDateString(
+      formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1),
+    )
+
+    const buildDays = (startOffset: number): CalendarDaySlot[] => {
+      const list: CalendarDaySlot[] = []
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(now)
+        d.setDate(now.getDate() - (startOffset - i))
+        const iso = formatDateToIso(d)
+        list.push({
+          isoDate: iso,
+          dayLabel: getDayOfWeekLabel(d),
+          dateLabel: formatShortDate(iso),
+          isToday: iso === currentIso,
+        })
+      }
+      return list
+    }
+
+    setRecent7Days(buildDays(6))
+    setPrevious7Days(buildDays(13))
+
+    fetchSupabaseData(true, currentIso)
+
+    const supabase = createClient()
+    const channel = supabase
+      .channel('shiftflow-phase1-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employees' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'departments' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shifts' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_records' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_requests' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'workspace_settings' },
+        () => fetchSupabaseData(false, currentIso),
+      )
+      .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [fetchSupabaseData])
 
   useEffect(() => {
     if (!notice) return
-    const id = setTimeout(() => setNotice(''), 4000)
+    const id = setTimeout(() => setNotice(''), 4500)
     return () => clearTimeout(id)
   }, [notice])
 
@@ -585,19 +1035,55 @@ export default function DashboardPage() {
     setDrawer(false)
   }
 
+  function openCheckInModal() {
+    const now = new Date()
+    setDefaultTimeHHMM(formatDateToHHMM(now))
+    if (!todayIso) {
+      setTodayIso(formatDateToIso(now))
+    }
+    if (employees.length > 0 && !selectedCheckInEmpId) {
+      setSelectedCheckInEmpId(String(employees[0].id))
+      setSelectedCheckInShift(employees[0].shift || 'Ca sáng')
+    }
+    setModal('manual-checkin')
+  }
+
+  function openCheckOutModal(log: AttendanceRecord) {
+    setDefaultTimeHHMM(formatDateToHHMM(new Date()))
+    setCheckoutTarget(log)
+  }
+
+  // ============================================================================
+  // CÁC HÀM THAO TÁC CƠ SỞ DỮ LIỆU (MUTATIONS) CÓ KIỂM TRA LỖI CHẶT CHẼ
+  // ============================================================================
+
   async function createShift(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const data = new FormData(e.currentTarget)
-    const name = String(data.get('name'))
-    const start = String(data.get('start'))
-    const end = String(data.get('end'))
-    const count = Number(data.get('count'))
-
-    if (end <= start) {
-      setNotice('Giờ kết thúc phải sau giờ bắt đầu.')
+    if (!isAdmin) {
+      setNotice('Bạn không có quyền quản trị để tạo ca làm mới.')
       return
     }
 
+    const data = new FormData(e.currentTarget)
+    const name = String(data.get('name') || '').trim()
+    const start = String(data.get('start') || '').trim()
+    const end = String(data.get('end') || '').trim()
+    const count = Number(data.get('count') || 0)
+
+    if (!name) {
+      setNotice('Vui lòng nhập tên ca làm việc.')
+      return
+    }
+    if (start === end) {
+      setNotice('Giờ kết thúc không được trùng với giờ bắt đầu.')
+      return
+    }
+    if (!Number.isFinite(count) || count < 1) {
+      setNotice('Số lượng nhân viên phân công phải lớn hơn 0.')
+      return
+    }
+
+    setIsSubmitting(true)
     const supabase = createClient()
     const { error } = await supabase.from('shifts').insert([
       {
@@ -609,33 +1095,48 @@ export default function DashboardPage() {
         icon: 'clock',
       },
     ])
+    setIsSubmitting(false)
 
-    if (!error) {
-      setModal(null)
-      setNotice('Đã thêm ca làm việc mới vào Supabase thành công.')
-    } else {
-      setNotice('Lỗi khi lưu ca làm xuống Supabase.')
+    if (error) {
+      setNotice(
+        'Không thể lưu ca làm việc. Vui lòng kiểm tra quyền hạn hoặc kết nối.',
+      )
+      return
     }
+
+    setModal(null)
+    setNotice(`Đã lưu ca làm việc "${name}" vào cơ sở dữ liệu.`)
+    await fetchSupabaseData(false, todayIso)
   }
 
   async function handleAddEmployee(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (!isAdmin) {
+      setNotice('Chỉ Quản trị viên mới có quyền thêm hồ sơ nhân sự.')
+      return
+    }
+
     const data = new FormData(e.currentTarget)
-    const name = String(data.get('name')).trim()
-    const email = String(data.get('email'))
-    const role = String(data.get('role'))
-    const department = String(data.get('department'))
-    const shift = String(data.get('shift'))
+    const name = String(data.get('name') || '').trim()
+    const email = String(data.get('email') || '').trim().toLowerCase()
+    const role = String(data.get('role') || '').trim()
+    const department = String(data.get('department') || '').trim()
+    const shift = String(data.get('shift') || 'Ca sáng').trim()
 
-    const words = name.split(' ')
-    const initials =
-      words.length >= 2
-        ? `${words[words.length - 2][0]}${words[words.length - 1][0]}`.toUpperCase()
-        : name.slice(0, 2).toUpperCase()
+    if (!name || !email || !role || !department) {
+      setNotice('Vui lòng điền đầy đủ thông tin nhân viên.')
+      return
+    }
 
-    const code = `SF-00${employees.length + 1}`
+    const initials = computeInitials(name)
+    const maxCodeNum = employees.reduce((max, emp) => {
+      const match = emp.code.match(/(\d+)$/)
+      return match ? Math.max(max, Number(match[1])) : max
+    }, employees.length)
+    const code = `SF-${String(maxCodeNum + 1).padStart(3, '0')}`
     const tone = ['peach', 'lavender', 'mint'][employees.length % 3]
 
+    setIsSubmitting(true)
     const supabase = createClient()
     const { error } = await supabase.from('employees').insert([
       {
@@ -650,141 +1151,838 @@ export default function DashboardPage() {
         tone,
       },
     ])
+    setIsSubmitting(false)
 
-    if (!error) {
-      setModal(null)
-      setNotice(`Đã thêm nhân viên ${name} vào Supabase thành công.`)
-    } else {
-      setNotice('Lỗi khi thêm nhân viên.')
+    if (error) {
+      if (error.code === '23505') {
+        setNotice('Email hoặc mã nhân viên đã tồn tại trong hệ thống.')
+      } else {
+        setNotice('Không thể thêm nhân viên vào cơ sở dữ liệu.')
+      }
+      return
     }
+
+    setModal(null)
+    setNotice(`Đã thêm nhân viên ${name} (${code}) thành công.`)
+    await fetchSupabaseData(false, todayIso)
   }
 
   async function handleAddDepartment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const data = new FormData(e.currentTarget)
-    const name = String(data.get('name'))
-    const manager = String(data.get('manager'))
-    const headcount = Number(data.get('headcount'))
+    if (!isAdmin) {
+      setNotice('Chỉ Quản trị viên mới có quyền thêm phòng ban.')
+      return
+    }
 
+    const data = new FormData(e.currentTarget)
+    const name = String(data.get('name') || '').trim()
+    const manager = String(data.get('manager') || '').trim()
+    const headcount = Number(data.get('headcount') || 0)
+    const activeShifts = String(
+      data.get('activeShifts') || 'Ca sáng, Ca chiều',
+    ).trim()
+
+    if (!name || !manager || headcount < 0) {
+      setNotice('Vui lòng kiểm tra lại thông tin phòng ban.')
+      return
+    }
+
+    setIsSubmitting(true)
     const supabase = createClient()
     const { error } = await supabase.from('departments').insert([
       {
         name,
         manager,
         headcount,
-        attendance_rate: 100,
-        active_shifts: 'Ca sáng, Ca chiều',
+        attendance_rate: 0,
+        active_shifts: activeShifts,
         tone: 'teal',
       },
     ])
+    setIsSubmitting(false)
 
-    if (!error) {
-      setModal(null)
-      setNotice(`Đã tạo ${name} thành công trên Supabase.`)
-    } else {
-      setNotice('Lỗi khi tạo phòng ban.')
+    if (error) {
+      setNotice('Không thể tạo phòng ban mới. Vui lòng thử lại.')
+      return
     }
+
+    setModal(null)
+    setNotice(`Đã tạo ${name} thành công.`)
+    await fetchSupabaseData(false, todayIso)
   }
 
-  function handleManualCheckIn(e: FormEvent<HTMLFormElement>) {
+  // Luồng Vào ca (Check-in) thực tế
+  async function handleManualCheckIn(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const now = new Date()
+    const fallbackDate = todayIso || formatDateToIso(now)
+
+    const data = new FormData(e.currentTarget)
+    const empId = Number(data.get('employeeId'))
+    const shiftName = String(data.get('shift') || '').trim()
+    const workDate = String(data.get('workDate') || fallbackDate).trim()
+    const checkIn = String(data.get('checkIn') || '').trim()
+    const checkOutRaw = String(data.get('checkOut') || '').trim()
+    const breakMinutes = Number(data.get('breakMinutes') || 0)
+    const isAbsent = data.get('isAbsent') === 'on'
+    const isOvernight = data.get('isOvernight') === 'on'
+
+    const selectedEmp = employees.find((emp) => emp.id === empId)
+    if (!selectedEmp) {
+      setNotice('Vui lòng chọn một nhân viên hợp lệ từ danh sách.')
+      return
+    }
+
+    const matchedShift = shifts.find((s) => s.name === shiftName)
+
+    if (!isAbsent) {
+      const openRecord = attendanceLogs.find(
+        (log) =>
+          (log.employeeId === selectedEmp.id ||
+            log.name.toLowerCase() === selectedEmp.name.toLowerCase()) &&
+          log.checkOut === null &&
+          log.status !== 'Vắng mặt',
+      )
+
+      if (openRecord) {
+        setNotice(
+          `Nhân viên ${selectedEmp.name} đang có ca làm ngày ${formatShortDate(openRecord.workDate)} (vào lúc ${openRecord.checkIn}) chưa tan ca. Vui lòng bấm "Tan ca" trước khi vào ca mới.`,
+        )
+        return
+      }
+    }
+
+    let finalStatus = 'Đúng giờ'
+    let finalCheckIn = checkIn
+    let finalCheckOut: string | null = checkOutRaw ? checkOutRaw : null
+    let totalMinutes = 0
+    let totalHoursText = 'Đang trong ca'
+
+    if (isAbsent) {
+      finalStatus = 'Vắng mặt'
+      finalCheckIn = '--:--'
+      finalCheckOut = null
+      totalMinutes = 0
+      totalHoursText = '0h 00m'
+    } else {
+      const inMins = parseTimeToMinutes(checkIn)
+      if (inMins === null) {
+        setNotice('Vui lòng nhập giờ vào ca hợp lệ.')
+        return
+      }
+
+      if (matchedShift) {
+        const shiftStartMins = parseTimeToMinutes(matchedShift.start)
+        if (
+          shiftStartMins !== null &&
+          inMins > shiftStartMins + settings.maxLateMinutes
+        ) {
+          finalStatus = 'Đi trễ'
+        }
+      }
+
+      if (finalCheckOut) {
+        const calc = computeWorkedMinutes(
+          finalCheckIn,
+          finalCheckOut,
+          breakMinutes,
+          isOvernight,
+        )
+        if (!calc.valid) {
+          setNotice(calc.error || 'Giờ tan ca không hợp lệ.')
+          return
+        }
+        totalMinutes = calc.totalMinutes
+        totalHoursText = formatMinutesToHoursText(totalMinutes)
+      }
+    }
+
+    setIsSubmitting(true)
+    const supabase = createClient()
+    const nowIsoStr = now.toISOString()
+    const { error } = await supabase.from('attendance_records').insert([
+      {
+        employee_id: selectedEmp.id,
+        shift_id: matchedShift?.id ?? null,
+        name: selectedEmp.name,
+        initials: selectedEmp.initials,
+        department: selectedEmp.department,
+        shift: shiftName || selectedEmp.shift,
+        work_date: workDate,
+        check_in: finalCheckIn,
+        check_out: finalCheckOut,
+        check_in_at: isAbsent ? null : nowIsoStr,
+        check_out_at: finalCheckOut ? nowIsoStr : null,
+        break_minutes: isAbsent ? 0 : Math.max(0, breakMinutes),
+        total_minutes: totalMinutes,
+        total_hours: totalHoursText,
+        status: finalStatus,
+        tone: selectedEmp.tone || 'teal',
+      },
+    ])
+    setIsSubmitting(false)
+
+    if (error) {
+      if (error.code === '23505') {
+        setNotice(
+          `Nhân viên ${selectedEmp.name} đang có ca làm chưa tan ca trong cơ sở dữ liệu.`,
+        )
+      } else {
+        setNotice(
+          'Không thể lưu bản ghi chấm công vào Supabase. Vui lòng kiểm tra quyền hạn hoặc kết nối.',
+        )
+      }
+      return
+    }
+
+    setModal(null)
+    setNotice(
+      isAbsent
+        ? `Đã ghi nhận trạng thái vắng mặt cho ${selectedEmp.name}.`
+        : finalCheckOut
+          ? `Đã lưu chấm công hoàn tất (${totalHoursText}) cho ${selectedEmp.name}.`
+          : `Đã ghi nhận vào ca lúc ${finalCheckIn} cho ${selectedEmp.name}.`,
+    )
+    await fetchSupabaseData(false, fallbackDate)
+  }
+
+  // Luồng Tan ca (Check-out) thực tế
+  async function handleCheckOutSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!checkoutTarget) return
+
+    const data = new FormData(e.currentTarget)
+    const checkOutTime = String(data.get('checkOut') || '').trim()
+    const breakMinutes = Number(data.get('breakMinutes') || 0)
+    const isOvernight = data.get('isOvernight') === 'on'
+
+    const calc = computeWorkedMinutes(
+      checkoutTarget.checkIn,
+      checkOutTime,
+      breakMinutes,
+      isOvernight,
+    )
+
+    if (!calc.valid) {
+      setNotice(calc.error || 'Dữ liệu giờ tan ca không hợp lệ.')
+      return
+    }
+
+    const totalHoursText = formatMinutesToHoursText(calc.totalMinutes)
+
+    setIsSubmitting(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('attendance_records')
+      .update({
+        check_out: checkOutTime,
+        check_out_at: new Date().toISOString(),
+        break_minutes: Math.max(0, breakMinutes),
+        total_minutes: calc.totalMinutes,
+        total_hours: totalHoursText,
+      })
+      .eq('id', checkoutTarget.id)
+    setIsSubmitting(false)
+
+    if (error) {
+      setNotice('Không thể cập nhật giờ tan ca lên cơ sở dữ liệu.')
+      return
+    }
+
+    const targetName = checkoutTarget.name
+    setCheckoutTarget(null)
+    setNotice(
+      `Đã ghi nhận tan ca lúc ${checkOutTime} cho ${targetName} (Tổng: ${totalHoursText}).`,
+    )
+    await fetchSupabaseData(false, todayIso)
+  }
+
+  async function handleCreateLeaveRequest(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const data = new FormData(e.currentTarget)
-    const name = String(data.get('name'))
-    const words = name.split(' ')
-    const initials =
-      words.length >= 2
-        ? `${words[words.length - 2][0]}${words[words.length - 1][0]}`.toUpperCase()
-        : 'NV'
-    setAttendanceLogs([
+    const empId = Number(data.get('employeeId'))
+    const type = String(data.get('type') || 'Nghỉ phép năm').trim()
+    const dateRange = String(data.get('dateRange') || '').trim()
+    const daysCount = String(data.get('daysCount') || '1 ngày').trim()
+    const reason = String(data.get('reason') || '').trim()
+
+    const emp = employees.find((item) => item.id === empId)
+    if (!emp || !dateRange || !reason) {
+      setNotice('Vui lòng điền đầy đủ thông tin đơn nghỉ phép.')
+      return
+    }
+
+    setIsSubmitting(true)
+    const supabase = createClient()
+    const { error } = await supabase.from('leave_requests').insert([
       {
-        id: Date.now(),
-        name,
-        initials,
-        department: String(data.get('department')),
-        shift: String(data.get('shift')),
-        checkIn: String(data.get('checkIn')),
-        checkOut: '17:00',
-        totalHours: '4h 00m',
-        status: 'Đúng giờ',
-        tone: 'mint',
+        employee_id: emp.id,
+        name: emp.name,
+        initials: emp.initials,
+        department: emp.department,
+        type,
+        reason,
+        date_range: dateRange,
+        days_count: daysCount,
+        tone: emp.tone || 'teal',
+        status: 'Chờ duyệt',
       },
-      ...attendanceLogs,
     ])
+    setIsSubmitting(false)
+
+    if (error) {
+      setNotice('Không thể gửi đơn nghỉ phép lên cơ sở dữ liệu.')
+      return
+    }
+
     setModal(null)
-    setNotice(`Đã ghi nhận chấm công cho ${name}.`)
+    setNotice(`Đã tạo đơn nghỉ phép cho ${emp.name} thành công.`)
+    await fetchSupabaseData(false, todayIso)
   }
 
   async function updateRequestStatus(id: number, status: string) {
+    if (!isAdmin) {
+      setNotice('Chỉ Quản trị viên mới có quyền phê duyệt hoặc từ chối đơn.')
+      return
+    }
+
+    setIsSubmitting(true)
     const supabase = createClient()
     const { error } = await supabase
       .from('leave_requests')
-      .update({ status })
+      .update({ status, updated_at: new Date().toISOString() })
       .eq('id', id)
+    setIsSubmitting(false)
 
-    if (!error) {
-      setRequests(requests.map((r) => (r.id === id ? { ...r, status } : r)))
-      setReview(null)
-      setNotice(`Đã cập nhật trạng thái đơn: ${status}.`)
-    } else {
-      setNotice('Lỗi khi cập nhật trạng thái đơn trên Supabase.')
+    if (error) {
+      setNotice('Lỗi phân quyền hoặc kết nối khi cập nhật trạng thái đơn.')
+      return
     }
+
+    setReview(null)
+    setNotice(`Đã cập nhật trạng thái đơn nghỉ phép: ${status}.`)
+    await fetchSupabaseData(false, todayIso)
   }
 
-  const pendingCount = requests.filter((r) => r.status === 'Chờ duyệt').length
-  const selectedRequest = requests.find((r) => r.id === review)
+  async function handleSaveSettings(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!isAdmin) {
+      setNotice('Chỉ Quản trị viên mới có quyền thay đổi cấu hình hệ thống.')
+      return
+    }
 
-  const metrics = [
-    {
-      label: 'Tổng nhân sự',
-      value: String(employees.length > 0 ? employees.length : 6),
-      description: 'Nhân viên đang hoạt động',
-      icon: 'users' as IconName,
-      tone: 'teal',
-      trend: '+2 trong tháng',
-    },
-    {
-      label: 'Đã chấm công hôm nay',
-      value: '22',
-      description: '91,7% tổng nhân sự',
-      icon: 'check' as IconName,
-      tone: 'blue',
-      trend: 'Đang hoạt động',
-    },
-    {
-      label: 'Đi trễ / Vắng mặt',
-      value: '2',
-      description: 'Cần kiểm tra',
-      icon: 'clock' as IconName,
-      tone: 'orange',
-      trend: '1 đi trễ · 1 vắng mặt',
-    },
-    {
-      label: 'Đơn chờ duyệt',
-      value: String(pendingCount),
-      description: 'Đang chờ xử lý',
-      icon: 'file' as IconName,
-      tone: 'purple',
-      trend: `${pendingCount} đơn cần xem xét`,
-    },
-  ]
+    const trimmedName = settings.workspaceName.trim()
+    const trimmedTz = settings.timezone.trim()
+    const lateMins = Number(settings.maxLateMinutes)
 
-  const filteredEmployees = employees.filter((emp) => {
-    const matchDept =
-      empDeptFilter === 'Tất cả' || emp.department === empDeptFilter
-    const matchQuery =
-      emp.name.toLowerCase().includes(empSearch.toLowerCase()) ||
-      emp.email.toLowerCase().includes(empSearch.toLowerCase()) ||
-      emp.role.toLowerCase().includes(empSearch.toLowerCase())
-    return matchDept && matchQuery
-  })
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      setNotice('Tên không gian làm việc phải từ 2 đến 100 ký tự.')
+      return
+    }
+    if (!trimmedTz) {
+      setNotice('Vui lòng nhập múi giờ hệ thống hợp lệ.')
+      return
+    }
+    if (!Number.isFinite(lateMins) || lateMins < 0 || lateMins > 240) {
+      setNotice('Số phút cho phép trễ phải nằm trong khoảng từ 0 đến 240 phút.')
+      return
+    }
 
-  const filteredAttendance = attendanceLogs.filter(
-    (log) => attFilter === 'Tất cả' || log.status === attFilter,
+    setIsSubmitting(true)
+    const supabase = createClient()
+    const { error } = await supabase.from('workspace_settings').upsert(
+      {
+        id: 1,
+        workspace_name: trimmedName,
+        timezone: trimmedTz,
+        max_late_minutes: Math.round(lateMins),
+        notify_leave_email: settings.notifyLeaveEmail,
+        alert_late_threshold: settings.alertLateThreshold,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' },
+    )
+    setIsSubmitting(false)
+
+    if (error) {
+      setNotice(
+        'Không thể lưu cấu hình vào cơ sở dữ liệu. Hãy đảm bảo bảng workspace_settings đã được tạo.',
+      )
+      return
+    }
+
+    setNotice(
+      'Đã lưu cấu hình hệ thống ShiftFlow vào cơ sở dữ liệu thành công.',
+    )
+    await fetchSupabaseData(false, todayIso)
+  }
+
+  async function handleToggleSetting(
+    field: 'notifyLeaveEmail' | 'alertLateThreshold',
+  ) {
+    if (!isAdmin) {
+      setNotice('Chỉ Quản trị viên mới có quyền thay đổi tùy chọn tự động hóa.')
+      return
+    }
+
+    const nextValue = !settings[field]
+    const updatedSettings = { ...settings, [field]: nextValue }
+    setSettings(updatedSettings)
+
+    const supabase = createClient()
+    const { error } = await supabase.from('workspace_settings').upsert(
+      {
+        id: 1,
+        workspace_name: updatedSettings.workspaceName.trim(),
+        timezone: updatedSettings.timezone.trim(),
+        max_late_minutes: Math.round(Number(updatedSettings.maxLateMinutes)),
+        notify_leave_email: updatedSettings.notifyLeaveEmail,
+        alert_late_threshold: updatedSettings.alertLateThreshold,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' },
+    )
+
+    if (error) {
+      setSettings(settings)
+      setNotice('Không thể lưu tùy chọn thông báo lên cơ sở dữ liệu.')
+      return
+    }
+
+    setNotice('Đã đồng bộ tùy chọn thông báo lên cơ sở dữ liệu.')
+  }
+
+  // ============================================================================
+  // TÍNH TOÁN SỐ LIỆU THỐNG KÊ, BIỂU ĐỒ 7 NGÀY & BÁO CÁO TỪ DỮ LIỆU THỰC TẾ
+  // ============================================================================
+
+  const currentMonthPrefix = todayIso ? todayIso.slice(0, 7) : ''
+
+  const pendingCount = useMemo(
+    () => requests.filter((r) => r.status === 'Chờ duyệt').length,
+    [requests],
   )
 
-  const filteredLeaves = requests.filter(
-    (req) => leaveFilter === 'Tất cả' || req.status === leaveFilter,
+  const selectedRequest = useMemo(
+    () => requests.find((r) => r.id === review),
+    [requests, review],
   )
+
+  const todayAttendanceStats = useMemo(() => {
+    const todayRecords = todayIso
+      ? attendanceLogs.filter((log) => log.workDate === todayIso)
+      : []
+    const checkedInRecords = todayRecords.filter(
+      (log) => log.status !== 'Vắng mặt',
+    )
+    const onTimeCount = todayRecords.filter(
+      (log) => log.status === 'Đúng giờ',
+    ).length
+    const lateCount = todayRecords.filter(
+      (log) => log.status === 'Đi trễ',
+    ).length
+    const absentCount = todayRecords.filter(
+      (log) => log.status === 'Vắng mặt',
+    ).length
+    const openShiftsCount = checkedInRecords.filter(
+      (log) => log.checkOut === null,
+    ).length
+    const completedShiftsCount = checkedInRecords.filter(
+      (log) => log.checkOut !== null,
+    ).length
+
+    const attendanceRatePercent =
+      employees.length > 0
+        ? ((checkedInRecords.length / employees.length) * 100)
+            .toFixed(1)
+            .replace('.', ',')
+        : '0'
+
+    return {
+      totalToday: todayRecords.length,
+      checkedInCount: checkedInRecords.length,
+      onTimeCount,
+      lateCount,
+      absentCount,
+      openShiftsCount,
+      completedShiftsCount,
+      attendanceRatePercent,
+    }
+  }, [attendanceLogs, employees.length, todayIso])
+
+  const activeEmployeesCount = useMemo(
+    () => employees.filter((e) => e.status === 'Đang hoạt động').length,
+    [employees],
+  )
+
+  const newEmployeesThisMonth = useMemo(
+    () =>
+      currentMonthPrefix
+        ? employees.filter(
+            (e) => e.createdAt && e.createdAt.startsWith(currentMonthPrefix),
+          ).length
+        : 0,
+    [employees, currentMonthPrefix],
+  )
+
+  const metrics = useMemo(
+    () => [
+      {
+        label: 'Tổng nhân sự',
+        value: String(employees.length),
+        description: `${activeEmployeesCount} nhân sự đang hoạt động`,
+        icon: 'users' as IconName,
+        tone: 'teal',
+        trend:
+          newEmployeesThisMonth > 0
+            ? `+${newEmployeesThisMonth} mới trong tháng`
+            : 'Dữ liệu từ Supabase',
+      },
+      {
+        label: 'Đã chấm công hôm nay',
+        value: String(todayAttendanceStats.checkedInCount),
+        description:
+          employees.length > 0
+            ? `${todayAttendanceStats.attendanceRatePercent}% tổng nhân sự`
+            : 'Chưa có hồ sơ nhân sự',
+        icon: 'check' as IconName,
+        tone: 'blue',
+        trend:
+          todayAttendanceStats.checkedInCount > 0
+            ? `${todayAttendanceStats.openShiftsCount} đang trong ca · ${todayAttendanceStats.completedShiftsCount} đã tan ca`
+            : 'Chưa có lượt chấm công hôm nay',
+      },
+      {
+        label: 'Đi trễ / Vắng mặt',
+        value: String(
+          todayAttendanceStats.lateCount + todayAttendanceStats.absentCount,
+        ),
+        description: todayIso
+          ? `Ghi nhận ngày ${formatShortDate(todayIso)}`
+          : 'Ghi nhận hôm nay',
+        icon: 'clock' as IconName,
+        tone: 'orange',
+        trend: `${todayAttendanceStats.lateCount} đi trễ · ${todayAttendanceStats.absentCount} vắng mặt`,
+      },
+      {
+        label: 'Đơn chờ duyệt',
+        value: String(pendingCount),
+        description:
+          pendingCount > 0 ? 'Đang chờ xử lý' : 'Đã xử lý toàn bộ đơn',
+        icon: 'file' as IconName,
+        tone: 'purple',
+        trend: `${pendingCount} đơn cần xem xét`,
+      },
+    ],
+    [
+      employees.length,
+      activeEmployeesCount,
+      newEmployeesThisMonth,
+      todayAttendanceStats,
+      todayIso,
+      pendingCount,
+    ],
+  )
+
+  const chartData = useMemo(() => {
+    const activeSlots = period === 'week' ? recent7Days : previous7Days
+    const days = activeSlots.map((slot) => {
+      const dayLogs = attendanceLogs.filter(
+        (log) => log.workDate === slot.isoDate,
+      )
+      return {
+        isoDate: slot.isoDate,
+        day: slot.dayLabel,
+        dateLabel: slot.dateLabel,
+        onTime: dayLogs.filter((l) => l.status === 'Đúng giờ').length,
+        late: dayLogs.filter((l) => l.status === 'Đi trễ').length,
+        absent: dayLogs.filter((l) => l.status === 'Vắng mặt').length,
+        isToday: slot.isToday,
+      }
+    })
+
+    const maxDayTotal = days.reduce(
+      (max, item) => Math.max(max, item.onTime + item.late + item.absent),
+      0,
+    )
+    const rawMax = Math.max(employees.length, maxDayTotal, 4)
+    const yAxisMax = Math.ceil(rawMax / 4) * 4
+
+    const totalOnTime = days.reduce((acc, item) => acc + item.onTime, 0)
+    const totalAll = days.reduce(
+      (acc, item) => acc + item.onTime + item.late + item.absent,
+      0,
+    )
+    const avgOnTimeRate =
+      totalAll > 0
+        ? `${((totalOnTime / totalAll) * 100).toFixed(1).replace('.', ',')}%`
+        : '0%'
+
+    return {
+      days,
+      yAxisMax,
+      yTicks: [
+        yAxisMax,
+        Math.round(yAxisMax * 0.75),
+        Math.round(yAxisMax * 0.5),
+        Math.round(yAxisMax * 0.25),
+        0,
+      ],
+      avgOnTimeRate,
+      totalRecordsInPeriod: totalAll,
+    }
+  }, [attendanceLogs, employees.length, period, recent7Days, previous7Days])
+
+  const realActivities = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = []
+
+    for (const log of attendanceLogs.slice(0, 10)) {
+      const actionText =
+        log.status === 'Vắng mặt'
+          ? 'được ghi nhận vắng mặt.'
+          : log.checkOut
+            ? `đã hoàn tất ca làm (${log.totalHours}).`
+            : 'vừa chấm công vào ca.'
+      items.push({
+        id: `att-${log.id}`,
+        icon: 'check',
+        tone: log.status === 'Đi trễ' ? 'orange' : 'teal',
+        name: log.name,
+        text: actionText,
+        detail: `${log.shift} · Ngày ${formatShortDate(log.workDate)} (${log.checkIn}${log.checkOut ? ` – ${log.checkOut}` : ''})`,
+        timestamp: log.createdAt || `${log.workDate}T08:00:00`,
+      })
+    }
+
+    for (const req of requests.slice(0, 10)) {
+      const reqText =
+        req.status === 'Đã duyệt'
+          ? 'đã được duyệt đơn nghỉ phép.'
+          : req.status === 'Từ chối'
+            ? 'bị từ chối đơn nghỉ phép.'
+            : 'gửi yêu cầu nghỉ phép mới.'
+      items.push({
+        id: `leave-${req.id}`,
+        icon: 'file',
+        tone: req.status === 'Chờ duyệt' ? 'orange' : 'blue',
+        name: req.name,
+        text: reqText,
+        detail: `${req.type} · ${req.date} (${req.days})`,
+        timestamp: req.updatedAt || req.createdAt || '',
+      })
+    }
+
+    return items
+      .sort((a, b) => {
+        const tA = a.timestamp ? Date.parse(a.timestamp) || 0 : 0
+        const tB = b.timestamp ? Date.parse(b.timestamp) || 0 : 0
+        return tB - tA
+      })
+      .slice(0, 8)
+  }, [attendanceLogs, requests])
+
+  const computedDepartments = useMemo(() => {
+    return departments.map((dept) => {
+      const deptEmployees = employees.filter((e) => e.department === dept.name)
+      const actualHeadcount =
+        deptEmployees.length > 0 ? deptEmployees.length : dept.headcount
+
+      const deptLogs = attendanceLogs.filter((l) => l.department === dept.name)
+      const deptOnTime = deptLogs.filter((l) => l.status === 'Đúng giờ').length
+      const actualRate =
+        deptLogs.length > 0
+          ? Number(((deptOnTime / deptLogs.length) * 100).toFixed(1))
+          : dept.attendanceRate
+
+      return {
+        ...dept,
+        actualHeadcount,
+        actualRate,
+        totalLogsCount: deptLogs.length,
+      }
+    })
+  }, [departments, employees, attendanceLogs])
+
+  const reportMetrics = useMemo(() => {
+    const monthLogs = currentMonthPrefix
+      ? attendanceLogs.filter((log) =>
+          log.workDate.startsWith(currentMonthPrefix),
+        )
+      : attendanceLogs
+    const totalMinutesMonth = monthLogs.reduce(
+      (sum, log) => sum + (log.totalMinutes || 0),
+      0,
+    )
+
+    const onTimeMonth = monthLogs.filter((l) => l.status === 'Đúng giờ').length
+    const onTimeRateMonth =
+      monthLogs.length > 0
+        ? ((onTimeMonth / monthLogs.length) * 100).toFixed(1).replace('.', ',')
+        : '0'
+
+    let overtimeMinutes = 0
+    for (const log of monthLogs) {
+      if (log.totalMinutes > 0) {
+        const matchedShift = shifts.find((s) => s.name === log.shift)
+        if (matchedShift) {
+          const shiftCalc = computeWorkedMinutes(
+            matchedShift.start,
+            matchedShift.end,
+            0,
+            true,
+          )
+          if (shiftCalc.valid && log.totalMinutes > shiftCalc.totalMinutes) {
+            overtimeMinutes += log.totalMinutes - shiftCalc.totalMinutes
+          }
+        } else if (log.totalMinutes > 8 * 60) {
+          overtimeMinutes += log.totalMinutes - 8 * 60
+        }
+      }
+    }
+
+    const approvedLeavesCount = requests.filter(
+      (r) => r.status === 'Đã duyệt',
+    ).length
+    const leaveApprovalRate =
+      requests.length > 0
+        ? Math.round((approvedLeavesCount / requests.length) * 100)
+        : 0
+
+    return {
+      monthRecordsCount: monthLogs.length,
+      totalHoursFormatted: formatMinutesToHoursText(totalMinutesMonth),
+      onTimeRateMonth: `${onTimeRateMonth}%`,
+      overtimeFormatted: formatMinutesToHoursText(overtimeMinutes),
+      approvedLeavesCount,
+      totalLeavesCount: requests.length,
+      leaveApprovalRate: `${leaveApprovalRate}%`,
+    }
+  }, [attendanceLogs, currentMonthPrefix, shifts, requests])
+
+  const filteredEmployees = useMemo(
+    () =>
+      employees.filter((emp) => {
+        const matchDept =
+          empDeptFilter === 'Tất cả' || emp.department === empDeptFilter
+        const q = empSearch.toLowerCase().trim()
+        const matchQuery =
+          !q ||
+          emp.name.toLowerCase().includes(q) ||
+          emp.email.toLowerCase().includes(q) ||
+          emp.role.toLowerCase().includes(q) ||
+          emp.code.toLowerCase().includes(q)
+        return matchDept && matchQuery
+      }),
+    [employees, empDeptFilter, empSearch],
+  )
+
+  const filteredAttendance = useMemo(
+    () =>
+      attendanceLogs.filter((log) => {
+        const matchStatus =
+          attFilter === 'Tất cả'
+            ? true
+            : attFilter === 'Đang trong ca'
+              ? log.checkOut === null && log.status !== 'Vắng mặt'
+              : log.status === attFilter
+        const matchDate = !attDateFilter || log.workDate === attDateFilter
+        return matchStatus && matchDate
+      }),
+    [attendanceLogs, attFilter, attDateFilter],
+  )
+
+  const filteredLeaves = useMemo(
+    () =>
+      requests.filter(
+        (req) => leaveFilter === 'Tất cả' || req.status === leaveFilter,
+      ),
+    [requests, leaveFilter],
+  )
+
+  // ============================================================================
+  // HÀM XUẤT BÁO CÁO CSV THỰC TẾ (UTF-8 BOM, XỬ LÝ TIẾNG VIỆT & DẤU PHẨY)
+  // ============================================================================
+
+  function handleExportCsv() {
+    const recordsToExport = filteredAttendance
+
+    if (recordsToExport.length === 0 && employees.length === 0) {
+      setNotice(
+        'Không có dữ liệu phù hợp để xuất báo cáo CSV. Vui lòng kiểm tra lại bộ lọc hoặc dữ liệu.',
+      )
+      return
+    }
+
+    try {
+      const exportDate = attDateFilter || todayIso || formatDateToIso(new Date())
+      const headers = [
+        'Mã bản ghi',
+        'Ngày làm việc',
+        'Họ và tên nhân viên',
+        'Phòng ban',
+        'Ca làm việc',
+        'Giờ vào ca',
+        'Giờ tan ca',
+        'Nghỉ giữa giờ (Phút)',
+        'Tổng thời gian',
+        'Số phút thực làm',
+        'Trạng thái chuyên cần',
+      ]
+
+      const rows =
+        recordsToExport.length > 0
+          ? recordsToExport.map((rec) => [
+              rec.id,
+              rec.workDate,
+              rec.name,
+              rec.department,
+              rec.shift,
+              rec.checkIn,
+              rec.checkOut ?? 'Đang trong ca',
+              rec.breakMinutes,
+              rec.totalHours,
+              rec.totalMinutes,
+              rec.status,
+            ])
+          : employees.map((emp) => [
+              emp.code,
+              exportDate,
+              emp.name,
+              emp.department,
+              emp.shift,
+              '--',
+              '--',
+              0,
+              '0h 00m',
+              0,
+              emp.status,
+            ])
+
+      const csvLines = [
+        headers.map(escapeCsvCell).join(','),
+        ...rows.map((row) => row.map(escapeCsvCell).join(',')),
+      ]
+
+      const csvContent = '\uFEFF' + csvLines.join('\r\n')
+      const blob = new Blob([csvContent], {
+        type: 'text/csv;charset=utf-8;',
+      })
+
+      const fileName = `ShiftFlow_BaoCao_${exportDate}.csv`
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', fileName)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      setNotice(`Đã tạo và tải xuống tệp báo cáo ${fileName} thành công.`)
+    } catch {
+      setNotice('Đã xảy ra lỗi khi tạo tệp CSV. Vui lòng thử lại.')
+    }
+  }
 
   return (
     <div className="dashboard">
@@ -841,10 +2039,10 @@ export default function DashboardPage() {
             <span>Cài đặt</span>
           </button>
           <div className="sidebar-profile">
-            <Avatar initials="MT" />
+            <Avatar initials={computeInitials(userName)} />
             <div>
-              <strong>Nguyễn Minh Trí</strong>
-              <span>{userEmail}</span>
+              <strong>{userName}</strong>
+              <span>{userEmail || 'Đang xác thực...'}</span>
             </div>
             <button
               className="icon-button"
@@ -869,7 +2067,7 @@ export default function DashboardPage() {
             >
               <Icon name="menu" />
             </button>
-            <span className="breadcrumb-home">Không gian làm việc</span>
+            <span className="breadcrumb-home">{settings.workspaceName}</span>
             <Icon name="chevron" />
             <strong>{active}</strong>
           </div>
@@ -892,12 +2090,12 @@ export default function DashboardPage() {
               onClick={() => setModal('notifications')}
             >
               <Icon name="bell" />
-              <i />
+              {realActivities.length > 0 && <i />}
             </button>
             <span className="header-divider" />
             <button className="header-user" onClick={() => setModal('profile')}>
-              <Avatar initials="MT" />
-              <span>Minh Trí</span>
+              <Avatar initials={computeInitials(userName)} />
+              <span>{userName.split(' ').slice(-2).join(' ')}</span>
               <Icon name="chevron" />
             </button>
           </div>
@@ -907,77 +2105,123 @@ export default function DashboardPage() {
           <div className="page-heading">
             <div>
               <div className="page-eyebrow">
-                <span /> KHÔNG GIAN QUẢN TRỊ (REALTIME DATABASE CONNECTED)
+                <span /> {settings.workspaceName.toUpperCase()}
               </div>
               <h1>{active}</h1>
               <p>
                 {active === 'Tổng quan' &&
-                  'Theo dõi tình hình nhân sự và hoạt động trong ngày.'}
+                  'Theo dõi tình hình nhân sự và dữ liệu chuyên cần theo thời gian thực.'}
                 {active === 'Nhân viên' &&
                   'Quản lý hồ sơ, vai trò và phân bổ nhân sự theo từng phòng ban.'}
                 {active === 'Phòng ban' &&
-                  'Cơ cấu tổ chức, trưởng bộ phận và hiệu suất chuyên cần.'}
+                  'Cơ cấu tổ chức, trưởng bộ phận và hiệu suất chuyên cần thực tế.'}
                 {active === 'Lịch làm việc' &&
                   'Tối ưu hóa ca làm việc và phân công lịch trực trong tuần.'}
                 {active === 'Chấm công' &&
-                  'Theo dõi giờ vào ca, tan ca và trạng thái chuyên cần thực tế.'}
+                  'Ghi nhận giờ vào ca, tan ca và tính toán thời gian làm việc thực tế.'}
                 {active === 'Đơn nghỉ phép' &&
-                  'Xét duyệt nhanh các yêu cầu nghỉ phép và đổi ca của nhân viên.'}
+                  'Tạo mới và xét duyệt các yêu cầu nghỉ phép, đổi ca của nhân viên.'}
                 {active === 'Báo cáo' &&
-                  'Phân tích chuyên sâu dữ liệu chấm công, giờ làm và tỷ lệ đúng giờ.'}
+                  'Phân tích chuyên sâu dữ liệu chấm công, giờ làm thực tế và xuất báo cáo CSV.'}
                 {active === 'Cài đặt' &&
-                  'Thiết lập quy tắc ca làm, múi giờ và thông báo cho hệ thống.'}
+                  'Thiết lập quy tắc ca làm, múi giờ và thông báo lưu trữ trên cơ sở dữ liệu.'}
               </p>
             </div>
             <div className="heading-actions">
               {active === 'Nhân viên' ? (
-                <button
-                  className="primary-button"
-                  onClick={() => setModal('add-employee')}
-                >
-                  <Icon name="plus" />
-                  Thêm nhân viên
-                </button>
+                isAdmin && (
+                  <button
+                    className="primary-button"
+                    onClick={() => setModal('add-employee')}
+                  >
+                    <Icon name="plus" />
+                    Thêm nhân viên
+                  </button>
+                )
               ) : active === 'Phòng ban' ? (
-                <button
-                  className="primary-button"
-                  onClick={() => setModal('add-department')}
-                >
-                  <Icon name="plus" />
-                  Thêm phòng ban
-                </button>
+                isAdmin && (
+                  <button
+                    className="primary-button"
+                    onClick={() => setModal('add-department')}
+                  >
+                    <Icon name="plus" />
+                    Thêm phòng ban
+                  </button>
+                )
               ) : active === 'Chấm công' ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    onClick={handleExportCsv}
+                  >
+                    <Icon name="download" />
+                    Xuất CSV
+                  </button>
+                  <button className="primary-button" onClick={openCheckInModal}>
+                    <Icon name="plus" />
+                    Vào ca / Chấm công
+                  </button>
+                </>
+              ) : active === 'Đơn nghỉ phép' ? (
                 <button
                   className="primary-button"
-                  onClick={() => setModal('manual-checkin')}
+                  onClick={() => setModal('create-leave')}
                 >
                   <Icon name="plus" />
-                  Chấm công thủ công
+                  Tạo đơn nghỉ phép
                 </button>
               ) : active === 'Báo cáo' ? (
-                <button
-                  className="primary-button"
-                  onClick={() =>
-                    setNotice('Đã xuất tệp báo cáo ShiftFlow_Report_10_2026.csv')
-                  }
-                >
+                <button className="primary-button" onClick={handleExportCsv}>
                   <Icon name="download" />
                   Xuất báo cáo CSV
                 </button>
               ) : (
                 <>
-                  <span className="demo-indicator">Cloud DB Sync</span>
-                  <button
-                    className="primary-button"
-                    onClick={() => setModal('create')}
-                  >
-                    <Icon name="plus" />
-                    Tạo ca làm
-                  </button>
+                  <span className="demo-indicator">
+                    {isLoading ? 'Đang đồng bộ...' : 'RLS & Realtime Active'}
+                  </span>
+                  {isAdmin && (
+                    <button
+                      className="primary-button"
+                      onClick={() => setModal('create')}
+                    >
+                      <Icon name="plus" />
+                      Tạo ca làm
+                    </button>
+                  )}
                 </>
               )}
             </div>
           </div>
+
+          {fetchError && (
+            <div
+              className="panel"
+              style={{
+                padding: '14px 18px',
+                marginBottom: 18,
+                borderLeft: '4px solid #ef4444',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
+              <div>
+                <strong style={{ color: '#b91c1c' }}>
+                  Cảnh báo truy vấn cơ sở dữ liệu
+                </strong>
+                <p style={{ margin: '4px 0 0', fontSize: 13 }}>{fetchError}</p>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => fetchSupabaseData(true, todayIso)}
+              >
+                Thử lại
+              </button>
+            </div>
+          )}
 
           {active === 'Tổng quan' && (
             <>
@@ -990,7 +2234,9 @@ export default function DashboardPage() {
                         <Icon name={metric.icon} />
                       </span>
                     </div>
-                    <strong className="metric-value">{metric.value}</strong>
+                    <strong className="metric-value">
+                      {isLoading ? '...' : metric.value}
+                    </strong>
                     <p>{metric.description}</p>
                     <div className={`metric-foot ${metric.tone}`}>
                       {metric.tone === 'teal' ? (
@@ -1009,9 +2255,11 @@ export default function DashboardPage() {
                   <PanelHeading
                     title="Tình hình chấm công"
                     subtitle={
-                      period === 'week'
-                        ? 'Thống kê trong 7 ngày gần nhất'
-                        : 'Thống kê 7 ngày trước đó'
+                      chartData.days.length >= 7
+                        ? period === 'week'
+                          ? `Thống kê thực tế 7 ngày gần nhất (${chartData.days[0]?.dateLabel} – ${chartData.days[6]?.dateLabel})`
+                          : `Thống kê thực tế 7 ngày trước đó (${chartData.days[0]?.dateLabel} – ${chartData.days[6]?.dateLabel})`
+                        : 'Đang tính toán chu kỳ 7 ngày...'
                     }
                     action={
                       <div className="custom-dropdown" ref={dropdownRef}>
@@ -1075,8 +2323,8 @@ export default function DashboardPage() {
                   </div>
                   <div className="chart-container">
                     <div className="chart-y-axis">
-                      {[24, 18, 12, 6, 0].map((n) => (
-                        <span key={n}>{n}</span>
+                      {chartData.yTicks.map((n, idx) => (
+                        <span key={`${n}-${idx}`}>{n}</span>
                       ))}
                     </div>
                     <div className="chart-plot">
@@ -1086,53 +2334,48 @@ export default function DashboardPage() {
                         ))}
                       </div>
                       <div className="chart-bars">
-                        {sampleAttendance.map((day, i) => {
-                          const onTime =
-                            period === 'week'
-                              ? day.onTime
-                              : day.onTime - (i % 3)
+                        {chartData.days.map((day) => {
+                          const maxVal = chartData.yAxisMax || 1
                           return (
                             <div
-                              className={`bar-column ${i === 2 ? 'today' : ''}`}
-                              key={day.day}
+                              className={`bar-column ${
+                                day.isToday ? 'today' : ''
+                              }`}
+                              key={day.isoDate}
                             >
                               <div
                                 className="bar-track"
                                 tabIndex={0}
-                                aria-label={`${day.day}: ${onTime} đúng giờ, ${day.late} đi trễ, ${day.absent} vắng mặt`}
+                                aria-label={`${day.day} (${day.dateLabel}): ${day.onTime} đúng giờ, ${day.late} đi trễ, ${day.absent} vắng mặt`}
                               >
                                 <div className="bar-stack">
                                   <div
                                     className="bar-absent"
                                     style={{
-                                      height: `${(day.absent / 24) * 100}%`,
+                                      height: `${(day.absent / maxVal) * 100}%`,
                                     }}
                                   />
                                   <div
                                     className="bar-late"
                                     style={{
-                                      height: `${(day.late / 24) * 100}%`,
+                                      height: `${(day.late / maxVal) * 100}%`,
                                     }}
                                   />
                                   <div
                                     className="bar-ontime"
                                     style={{
-                                      height: `${(onTime / 24) * 100}%`,
+                                      height: `${(day.onTime / maxVal) * 100}%`,
                                     }}
                                   />
                                 </div>
                                 <span className="chart-tooltip">
-                                  {onTime} đúng giờ · {day.late} trễ ·{' '}
+                                  {day.onTime} đúng giờ · {day.late} trễ ·{' '}
                                   {day.absent} vắng
                                 </span>
                               </div>
                               <span className="bar-label">
                                 {day.day}
-                                <small>
-                                  {period === 'week'
-                                    ? day.date
-                                    : `${String(i + 10).padStart(2, '0')}/10`}
-                                </small>
+                                <small>{day.dateLabel}</small>
                               </span>
                             </div>
                           )
@@ -1143,10 +2386,11 @@ export default function DashboardPage() {
                   <div className="chart-footer">
                     <span>
                       <span className="tiny-dot" />
-                      Tỷ lệ đúng giờ trung bình
+                      Tỷ lệ đúng giờ trung bình (
+                      {chartData.totalRecordsInPeriod} lượt chấm công)
                     </span>
                     <strong>
-                      {period === 'week' ? '87,5%' : '83,3%'}
+                      {chartData.avgOnTimeRate}
                       <span> trong kỳ</span>
                     </strong>
                   </div>
@@ -1155,49 +2399,74 @@ export default function DashboardPage() {
                 <section className="panel schedule-panel">
                   <PanelHeading
                     title="Lịch làm việc hôm nay"
-                    subtitle="Ca làm và tình trạng nhân sự"
+                    subtitle="Ca làm và tình trạng nhân sự thực tế"
                     action={
                       <span className="count-label">
                         {shifts.length} ca làm
                       </span>
                     }
                   />
-                  <div className="shift-list">
-                    {shifts.slice(0, 3).map((shift, i) => (
-                      <div
-                        className={`shift-item ${i === 0 ? 'ongoing' : ''}`}
-                        key={`${shift.name}-${i}`}
-                      >
-                        <span className="shift-icon">
-                          <Icon name={shift.icon} />
-                        </span>
-                        <div className="shift-details">
-                          <div className="shift-title">
-                            <h3>{shift.name}</h3>
-                            <span
-                              className={`badge ${
-                                i === 0 ? 'success' : 'neutral'
-                              }`}
-                            >
-                              {shift.status}
+                  {shifts.length === 0 ? (
+                    <div className="table-note">
+                      <Icon name="calendar" />
+                      Chưa có ca làm việc nào được thiết lập.
+                    </div>
+                  ) : (
+                    <div className="shift-list">
+                      {shifts.slice(0, 3).map((shift, i) => {
+                        const assignedEmps = employees.filter(
+                          (e) => e.shift === shift.name,
+                        )
+                        const displayCount =
+                          assignedEmps.length > 0
+                            ? assignedEmps.length
+                            : shift.count
+                        return (
+                          <div
+                            className={`shift-item ${i === 0 ? 'ongoing' : ''}`}
+                            key={shift.id ?? `${shift.name}-${i}`}
+                          >
+                            <span className="shift-icon">
+                              <Icon name={shift.icon} />
                             </span>
-                          </div>
-                          <p>
-                            <Icon name="clock" />
-                            {shift.start} – {shift.end}
-                          </p>
-                          <div className="shift-employees">
-                            <div className="avatar-stack">
-                              <Avatar initials="QH" tone="peach" />
-                              <Avatar initials="BA" tone="lavender" />
-                              <Avatar initials="MT" tone="mint" />
+                            <div className="shift-details">
+                              <div className="shift-title">
+                                <h3>{shift.name}</h3>
+                                <span
+                                  className={`badge ${
+                                    shift.status === 'Đang diễn ra'
+                                      ? 'success'
+                                      : 'neutral'
+                                  }`}
+                                >
+                                  {shift.status}
+                                </span>
+                              </div>
+                              <p>
+                                <Icon name="clock" />
+                                {shift.start} – {shift.end}
+                              </p>
+                              <div className="shift-employees">
+                                <div className="avatar-stack">
+                                  {(assignedEmps.length > 0
+                                    ? assignedEmps.slice(0, 3)
+                                    : employees.slice(0, 3)
+                                  ).map((emp) => (
+                                    <Avatar
+                                      key={emp.id}
+                                      initials={emp.initials}
+                                      tone={emp.tone}
+                                    />
+                                  ))}
+                                </div>
+                                <span>{displayCount} nhân viên</span>
+                              </div>
                             </div>
-                            <span>{shift.count} nhân viên</span>
                           </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        )
+                      })}
+                    </div>
+                  )}
                   <button
                     className="panel-bottom-link"
                     onClick={() => navigate('Lịch làm việc')}
@@ -1211,7 +2480,7 @@ export default function DashboardPage() {
               <div className="content-grid lower-grid">
                 <section className="panel leave-panel">
                   <PanelHeading
-                    title="Đơn nghỉ phép chờ duyệt"
+                    title="Đơn nghỉ phép gần đây"
                     action={
                       <button
                         className="text-button"
@@ -1222,48 +2491,56 @@ export default function DashboardPage() {
                       </button>
                     }
                   />
-                  <div className="request-table">
-                    <div className="request-table-head">
-                      <span>NHÂN VIÊN</span>
-                      <span>THỜI GIAN NGHỈ</span>
-                      <span>TRẠNG THÁI</span>
-                      <span />
+                  {requests.length === 0 ? (
+                    <div className="table-note">
+                      <Icon name="file" />
+                      Chưa có đơn nghỉ phép nào trong cơ sở dữ liệu.
                     </div>
-                    {requests.slice(0, 3).map((r) => (
-                      <button
-                        className="request-row"
-                        key={r.id}
-                        onClick={() => setReview(r.id)}
-                      >
-                        <span className="employee-cell">
-                          <Avatar initials={r.initials} tone={r.tone} />
-                          <span>
-                            <strong>{r.name}</strong>
-                            <small>{r.type}</small>
-                          </span>
-                        </span>
-                        <span className="leave-date">
-                          {r.date}
-                          <small>{r.days}</small>
-                        </span>
-                        <span
-                          className={`badge ${
-                            r.status === 'Đã duyệt'
-                              ? 'success'
-                              : r.status === 'Từ chối'
-                                ? 'danger'
-                                : 'warning'
-                          }`}
+                  ) : (
+                    <div className="request-table">
+                      <div className="request-table-head">
+                        <span>NHÂN VIÊN</span>
+                        <span>THỜI GIAN NGHỈ</span>
+                        <span>TRẠNG THÁI</span>
+                        <span />
+                      </div>
+                      {requests.slice(0, 3).map((r) => (
+                        <button
+                          className="request-row"
+                          key={r.id}
+                          onClick={() => setReview(r.id)}
                         >
-                          {r.status}
-                        </span>
-                        <Icon name="chevron" />
-                      </button>
-                    ))}
-                  </div>
+                          <span className="employee-cell">
+                            <Avatar initials={r.initials} tone={r.tone} />
+                            <span>
+                              <strong>{r.name}</strong>
+                              <small>{r.type}</small>
+                            </span>
+                          </span>
+                          <span className="leave-date">
+                            {r.date}
+                            <small>{r.days}</small>
+                          </span>
+                          <span
+                            className={`badge ${
+                              r.status === 'Đã duyệt'
+                                ? 'success'
+                                : r.status === 'Từ chối'
+                                  ? 'danger'
+                                  : 'warning'
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                          <Icon name="chevron" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="table-note">
                     <Icon name="file" />
-                    Bạn có {pendingCount} đơn nghỉ phép đang chờ phê duyệt.
+                    Hệ thống hiện có {pendingCount} đơn nghỉ phép đang chờ phê
+                    duyệt.
                   </div>
                 </section>
 
@@ -1280,7 +2557,10 @@ export default function DashboardPage() {
                       </button>
                     }
                   />
-                  <ActivityFeed />
+                  <ActivityFeedList
+                    items={realActivities.slice(0, 3)}
+                    nowMs={nowMs}
+                  />
                 </section>
               </div>
             </>
@@ -1294,17 +2574,22 @@ export default function DashboardPage() {
                   <input
                     value={empSearch}
                     onChange={(e) => setEmpSearch(e.target.value)}
-                    placeholder="Tìm theo tên, email hoặc chức vụ..."
+                    placeholder="Tìm theo mã NV, tên, email hoặc chức vụ..."
                   />
                 </div>
                 <div className="filter-pills">
                   {[
                     'Tất cả',
-                    'Phòng Kỹ thuật',
-                    'Phòng Marketing',
-                    'Phòng Nhân sự',
-                    'Phòng Vận hành',
-                    'Phòng Kinh doanh',
+                    ...Array.from(
+                      new Set([
+                        'Phòng Kỹ thuật',
+                        'Phòng Marketing',
+                        'Phòng Nhân sự',
+                        'Phòng Vận hành',
+                        'Phòng Kinh doanh',
+                        ...departments.map((d) => d.name),
+                      ]),
+                    ),
                   ].map((dept) => (
                     <button
                       key={dept}
@@ -1319,175 +2604,226 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Mã NV</th>
-                      <th>Nhân viên</th>
-                      <th>Chức vụ</th>
-                      <th>Phòng ban</th>
-                      <th>Ca mặc định</th>
-                      <th>Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEmployees.map((emp) => (
-                      <tr key={emp.id}>
-                        <td>
-                          <strong>{emp.code}</strong>
-                        </td>
-                        <td>
-                          <div className="employee-cell">
-                            <Avatar initials={emp.initials} tone={emp.tone} />
-                            <span>
-                              <strong>{emp.name}</strong>
-                              <small>{emp.email}</small>
-                            </span>
-                          </div>
-                        </td>
-                        <td>{emp.role}</td>
-                        <td>{emp.department}</td>
-                        <td>{emp.shift}</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              emp.status === 'Đang hoạt động'
-                                ? 'success'
-                                : 'warning'
-                            }`}
-                          >
-                            {emp.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
-          {active === 'Phòng ban' && (
-            <div className="dept-grid">
-              {departments.map((d) => (
-                <article className="dept-card" key={d.id}>
-                  <div className="dept-head">
-                    <div>
-                      <h3>{d.name}</h3>
-                      <p>Trưởng bộ phận: {d.manager}</p>
-                    </div>
-                    <span className={`metric-icon ${d.tone}`}>
-                      <Icon name="building" />
-                    </span>
-                  </div>
-                  <div className="dept-progress-wrap">
-                    <div className="dept-progress-label">
-                      <span>Tỷ lệ chuyên cần</span>
-                      <strong>{d.attendanceRate}%</strong>
-                    </div>
-                    <div className="dept-progress-bar">
-                      <div
-                        className="dept-progress-fill"
-                        style={{ width: `${d.attendanceRate}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="dept-footer">
-                    <span>
-                      <strong>{d.headcount}</strong> nhân sự
-                    </span>
-                    <span>{d.activeShifts}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-
-          {active === 'Lịch làm việc' && (
-            <>
-              <div className="schedule-cards-row">
-                {shifts.map((s, idx) => (
-                  <article className="dept-card" key={`${s.name}-${idx}`}>
-                    <div className="dept-head">
-                      <div>
-                        <h3>{s.name}</h3>
-                        <p>
-                          Khung giờ: {s.start} – {s.end}
-                        </p>
-                      </div>
-                      <span className="metric-icon teal">
-                        <Icon name={s.icon} />
-                      </span>
-                    </div>
-                    <div className="dept-footer">
-                      <span>
-                        <strong>{s.count}</strong> nhân viên được phân ca
-                      </span>
-                      <span
-                        className={`badge ${
-                          s.status === 'Đang diễn ra' ? 'success' : 'neutral'
-                        }`}
-                      >
-                        {s.status}
-                      </span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-
-              <section className="panel">
-                <PanelHeading
-                  title="Bảng phân ca trong tuần (12/10 – 18/10)"
-                  subtitle="Lịch trực cố định theo từng nhân sự chủ chốt"
-                />
-                <div className="data-table-wrap" style={{ marginTop: 14 }}>
+              {isLoading ? (
+                <div className="table-note">
+                  <Icon name="clock" />
+                  Đang tải danh sách nhân sự từ cơ sở dữ liệu...
+                </div>
+              ) : filteredEmployees.length === 0 ? (
+                <div className="table-note">
+                  <Icon name="users" />
+                  Không tìm thấy nhân viên nào phù hợp với bộ lọc hiện tại.
+                </div>
+              ) : (
+                <div className="data-table-wrap">
                   <table className="data-table">
                     <thead>
                       <tr>
+                        <th>Mã NV</th>
                         <th>Nhân viên</th>
+                        <th>Chức vụ</th>
                         <th>Phòng ban</th>
-                        <th>Thứ 2</th>
-                        <th>Thứ 3</th>
-                        <th>Thứ 4</th>
-                        <th>Thứ 5</th>
-                        <th>Thứ 6</th>
-                        <th>Thứ 7</th>
+                        <th>Ca mặc định</th>
+                        <th>Trạng thái</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {employees.map((emp) => (
+                      {filteredEmployees.map((emp) => (
                         <tr key={emp.id}>
+                          <td>
+                            <strong>{emp.code}</strong>
+                          </td>
                           <td>
                             <div className="employee-cell">
                               <Avatar initials={emp.initials} tone={emp.tone} />
-                              <strong>{emp.name}</strong>
+                              <span>
+                                <strong>{emp.name}</strong>
+                                <small>{emp.email}</small>
+                              </span>
                             </div>
                           </td>
+                          <td>{emp.role}</td>
                           <td>{emp.department}</td>
+                          <td>{emp.shift}</td>
                           <td>
-                            <span className="badge success">{emp.shift}</span>
-                          </td>
-                          <td>
-                            <span className="badge success">{emp.shift}</span>
-                          </td>
-                          <td>
-                            <span className="badge success">{emp.shift}</span>
-                          </td>
-                          <td>
-                            <span className="badge success">{emp.shift}</span>
-                          </td>
-                          <td>
-                            <span className="badge success">{emp.shift}</span>
-                          </td>
-                          <td>
-                            <span className="badge neutral">Nghỉ tuần</span>
+                            <span
+                              className={`badge ${
+                                emp.status === 'Đang hoạt động'
+                                  ? 'success'
+                                  : 'warning'
+                              }`}
+                            >
+                              {emp.status}
+                            </span>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              )}
+            </section>
+          )}
+
+          {active === 'Phòng ban' && (
+            <>
+              {computedDepartments.length === 0 ? (
+                <section className="panel">
+                  <div className="table-note">
+                    <Icon name="building" />
+                    Chưa có dữ liệu phòng ban trong cơ sở dữ liệu.
+                  </div>
+                </section>
+              ) : (
+                <div className="dept-grid">
+                  {computedDepartments.map((d) => (
+                    <article className="dept-card" key={d.id}>
+                      <div className="dept-head">
+                        <div>
+                          <h3>{d.name}</h3>
+                          <p>Trưởng bộ phận: {d.manager}</p>
+                        </div>
+                        <span className={`metric-icon ${d.tone}`}>
+                          <Icon name="building" />
+                        </span>
+                      </div>
+                      <div className="dept-progress-wrap">
+                        <div className="dept-progress-label">
+                          <span>
+                            Tỷ lệ chuyên cần
+                            {d.totalLogsCount > 0
+                              ? ` (${d.totalLogsCount} bản ghi)`
+                              : ''}
+                          </span>
+                          <strong>{d.actualRate}%</strong>
+                        </div>
+                        <div className="dept-progress-bar">
+                          <div
+                            className="dept-progress-fill"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, d.actualRate))}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="dept-footer">
+                        <span>
+                          <strong>{d.actualHeadcount}</strong> nhân sự
+                        </span>
+                        <span>{d.activeShifts}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {active === 'Lịch làm việc' && (
+            <>
+              <div className="schedule-cards-row">
+                {shifts.map((s, idx) => {
+                  const assignedCount = employees.filter(
+                    (e) => e.shift === s.name,
+                  ).length
+                  return (
+                    <article
+                      className="dept-card"
+                      key={s.id ?? `${s.name}-${idx}`}
+                    >
+                      <div className="dept-head">
+                        <div>
+                          <h3>{s.name}</h3>
+                          <p>
+                            Khung giờ: {s.start} – {s.end}
+                          </p>
+                        </div>
+                        <span className="metric-icon teal">
+                          <Icon name={s.icon} />
+                        </span>
+                      </div>
+                      <div className="dept-footer">
+                        <span>
+                          <strong>
+                            {assignedCount > 0 ? assignedCount : s.count}
+                          </strong>{' '}
+                          nhân viên được phân ca
+                        </span>
+                        <span
+                          className={`badge ${
+                            s.status === 'Đang diễn ra' ? 'success' : 'neutral'
+                          }`}
+                        >
+                          {s.status}
+                        </span>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+
+              <section className="panel">
+                <PanelHeading
+                  title="Bảng phân ca trong tuần"
+                  subtitle="Lịch trực cố định theo từng nhân sự đang hoạt động"
+                />
+                {employees.length === 0 ? (
+                  <div className="table-note">
+                    <Icon name="users" />
+                    Chưa có dữ liệu nhân viên để hiển thị bảng phân ca.
+                  </div>
+                ) : (
+                  <div className="data-table-wrap" style={{ marginTop: 14 }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Nhân viên</th>
+                          <th>Phòng ban</th>
+                          <th>Thứ 2</th>
+                          <th>Thứ 3</th>
+                          <th>Thứ 4</th>
+                          <th>Thứ 5</th>
+                          <th>Thứ 6</th>
+                          <th>Thứ 7</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employees.map((emp) => (
+                          <tr key={emp.id}>
+                            <td>
+                              <div className="employee-cell">
+                                <Avatar
+                                  initials={emp.initials}
+                                  tone={emp.tone}
+                                />
+                                <strong>{emp.name}</strong>
+                              </div>
+                            </td>
+                            <td>{emp.department}</td>
+                            <td>
+                              <span className="badge success">{emp.shift}</span>
+                            </td>
+                            <td>
+                              <span className="badge success">{emp.shift}</span>
+                            </td>
+                            <td>
+                              <span className="badge success">{emp.shift}</span>
+                            </td>
+                            <td>
+                              <span className="badge success">{emp.shift}</span>
+                            </td>
+                            <td>
+                              <span className="badge success">{emp.shift}</span>
+                            </td>
+                            <td>
+                              <span className="badge neutral">Nghỉ tuần</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -1495,11 +2831,45 @@ export default function DashboardPage() {
           {active === 'Chấm công' && (
             <section className="panel">
               <div className="module-toolbar">
-                <div>
-                  <strong>Nhật ký chấm công hôm nay</strong>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <strong>Nhật ký chấm công thực tế</strong>
+                  <input
+                    type="date"
+                    value={attDateFilter}
+                    onChange={(e) => setAttDateFilter(e.target.value)}
+                    aria-label="Lọc theo ngày chấm công"
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #e2e8f0',
+                      fontSize: 13,
+                    }}
+                  />
+                  {attDateFilter && (
+                    <button
+                      type="button"
+                      className="pill-btn"
+                      onClick={() => setAttDateFilter('')}
+                    >
+                      Xóa lọc ngày
+                    </button>
+                  )}
                 </div>
                 <div className="filter-pills">
-                  {['Tất cả', 'Đúng giờ', 'Đi trễ', 'Vắng mặt'].map((st) => (
+                  {[
+                    'Tất cả',
+                    'Đang trong ca',
+                    'Đúng giờ',
+                    'Đi trễ',
+                    'Vắng mặt',
+                  ].map((st) => (
                     <button
                       key={st}
                       type="button"
@@ -1511,53 +2881,118 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Nhân viên</th>
-                      <th>Phòng ban</th>
-                      <th>Ca làm việc</th>
-                      <th>Giờ vào</th>
-                      <th>Giờ ra</th>
-                      <th>Tổng thời gian</th>
-                      <th>Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAttendance.map((log) => (
-                      <tr key={log.id}>
-                        <td>
-                          <div className="employee-cell">
-                            <Avatar initials={log.initials} tone={log.tone} />
-                            <strong>{log.name}</strong>
-                          </div>
-                        </td>
-                        <td>{log.department}</td>
-                        <td>{log.shift}</td>
-                        <td>
-                          <strong>{log.checkIn}</strong>
-                        </td>
-                        <td>{log.checkOut}</td>
-                        <td>{log.totalHours}</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              log.status === 'Đúng giờ'
-                                ? 'success'
-                                : log.status === 'Đi trễ'
-                                  ? 'warning'
-                                  : 'danger'
-                            }`}
-                          >
-                            {log.status}
-                          </span>
-                        </td>
+              {isLoading ? (
+                <div className="table-note">
+                  <Icon name="clock" />
+                  Đang tải dữ liệu chấm công từ Supabase...
+                </div>
+              ) : filteredAttendance.length === 0 ? (
+                <div className="table-note">
+                  <Icon name="check" />
+                  Chưa có bản ghi chấm công nào phù hợp với bộ lọc. Hãy nhấn
+                  &ldquo;Vào ca / Chấm công&rdquo; để ghi nhận dữ liệu thực tế.
+                </div>
+              ) : (
+                <div className="data-table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Ngày</th>
+                        <th>Nhân viên</th>
+                        <th>Phòng ban</th>
+                        <th>Ca làm việc</th>
+                        <th>Giờ vào</th>
+                        <th>Giờ ra</th>
+                        <th>Tổng thời gian</th>
+                        <th>Trạng thái</th>
+                        <th>Thao tác</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {filteredAttendance.map((log) => {
+                        const isOpenShift =
+                          log.checkOut === null && log.status !== 'Vắng mặt'
+                        return (
+                          <tr key={log.id}>
+                            <td>
+                              <strong>{formatShortDate(log.workDate)}</strong>
+                            </td>
+                            <td>
+                              <div className="employee-cell">
+                                <Avatar
+                                  initials={log.initials}
+                                  tone={log.tone}
+                                />
+                                <strong>{log.name}</strong>
+                              </div>
+                            </td>
+                            <td>{log.department}</td>
+                            <td>{log.shift}</td>
+                            <td>
+                              <strong>{log.checkIn}</strong>
+                            </td>
+                            <td>
+                              {log.checkOut ? (
+                                <strong>{log.checkOut}</strong>
+                              ) : log.status === 'Vắng mặt' ? (
+                                '--:--'
+                              ) : (
+                                <span className="badge neutral">
+                                  Chưa tan ca
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              {log.totalHours}
+                              {log.breakMinutes > 0 && (
+                                <small
+                                  style={{
+                                    display: 'block',
+                                    color: '#64748b',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  Nghỉ: {log.breakMinutes}p
+                                </small>
+                              )}
+                            </td>
+                            <td>
+                              <span
+                                className={`badge ${
+                                  log.status === 'Đúng giờ'
+                                    ? 'success'
+                                    : log.status === 'Đi trễ'
+                                      ? 'warning'
+                                      : 'danger'
+                                }`}
+                              >
+                                {log.status}
+                              </span>
+                            </td>
+                            <td>
+                              {isOpenShift ? (
+                                <button
+                                  type="button"
+                                  className="mini-btn approve"
+                                  onClick={() => openCheckOutModal(log)}
+                                >
+                                  Tan ca
+                                </button>
+                              ) : (
+                                <span
+                                  style={{ fontSize: 12, color: '#64748b' }}
+                                >
+                                  Đã chốt
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
           )}
 
@@ -1579,75 +3014,90 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Nhân viên</th>
-                      <th>Loại đơn</th>
-                      <th>Lý do</th>
-                      <th>Thời gian</th>
-                      <th>Trạng thái</th>
-                      <th>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredLeaves.map((req) => (
-                      <tr key={req.id}>
-                        <td>
-                          <div className="employee-cell">
-                            <Avatar initials={req.initials} tone={req.tone} />
-                            <span>
-                              <strong>{req.name}</strong>
-                              <small>{req.department}</small>
-                            </span>
-                          </div>
-                        </td>
-                        <td>{req.type}</td>
-                        <td>{req.reason}</td>
-                        <td>
-                          <strong>{req.date}</strong> ({req.days})
-                        </td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              req.status === 'Đã duyệt'
-                                ? 'success'
-                                : req.status === 'Từ chối'
-                                  ? 'danger'
-                                  : 'warning'
-                            }`}
-                          >
-                            {req.status}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="action-group">
-                            <button
-                              type="button"
-                              className="mini-btn approve"
-                              onClick={() =>
-                                updateRequestStatus(req.id, 'Đã duyệt')
-                              }
-                            >
-                              Duyệt
-                            </button>
-                            <button
-                              type="button"
-                              className="mini-btn reject"
-                              onClick={() =>
-                                updateRequestStatus(req.id, 'Từ chối')
-                              }
-                            >
-                              Từ chối
-                            </button>
-                          </div>
-                        </td>
+              {filteredLeaves.length === 0 ? (
+                <div className="table-note">
+                  <Icon name="file" />
+                  Không có đơn nghỉ phép nào trong danh mục này.
+                </div>
+              ) : (
+                <div className="data-table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Nhân viên</th>
+                        <th>Loại đơn</th>
+                        <th>Lý do</th>
+                        <th>Thời gian</th>
+                        <th>Trạng thái</th>
+                        <th>Thao tác</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {filteredLeaves.map((req) => (
+                        <tr key={req.id}>
+                          <td>
+                            <div className="employee-cell">
+                              <Avatar initials={req.initials} tone={req.tone} />
+                              <span>
+                                <strong>{req.name}</strong>
+                                <small>{req.department}</small>
+                              </span>
+                            </div>
+                          </td>
+                          <td>{req.type}</td>
+                          <td>{req.reason}</td>
+                          <td>
+                            <strong>{req.date}</strong> ({req.days})
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${
+                                req.status === 'Đã duyệt'
+                                  ? 'success'
+                                  : req.status === 'Từ chối'
+                                    ? 'danger'
+                                    : 'warning'
+                              }`}
+                            >
+                              {req.status}
+                            </span>
+                          </td>
+                          <td>
+                            {isAdmin ? (
+                              <div className="action-group">
+                                <button
+                                  type="button"
+                                  className="mini-btn approve"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    updateRequestStatus(req.id, 'Đã duyệt')
+                                  }
+                                >
+                                  Duyệt
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mini-btn reject"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    updateRequestStatus(req.id, 'Từ chối')
+                                  }
+                                >
+                                  Từ chối
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 12, color: '#64748b' }}>
+                                Chỉ xem
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
           )}
 
@@ -1656,15 +3106,23 @@ export default function DashboardPage() {
               <section className="metrics-grid">
                 <article className="metric-card">
                   <div className="metric-top">
-                    <span>Tổng giờ công tháng 10</span>
+                    <span>Tổng giờ công tháng này</span>
                     <span className="metric-icon teal">
                       <Icon name="clock" />
                     </span>
                   </div>
-                  <strong className="metric-value">1.840h</strong>
-                  <p>Đạt 98,2% kế hoạch tháng</p>
+                  <strong className="metric-value">
+                    {reportMetrics.totalHoursFormatted}
+                  </strong>
+                  <p>
+                    Tổng hợp từ {reportMetrics.monthRecordsCount} bản ghi chấm
+                    công
+                  </p>
                   <div className="metric-foot teal">
-                    <span className="trend-arrow">↗</span> +4,5% so với tháng trước
+                    <span className="trend-arrow">↗</span> Dữ liệu thực tế{' '}
+                    {currentMonthPrefix
+                      ? `tháng ${currentMonthPrefix.split('-')[1]}/${currentMonthPrefix.split('-')[0]}`
+                      : 'trong kỳ'}
                   </div>
                 </article>
                 <article className="metric-card">
@@ -1674,36 +3132,43 @@ export default function DashboardPage() {
                       <Icon name="check" />
                     </span>
                   </div>
-                  <strong className="metric-value">92,4%</strong>
-                  <p>Vượt mục tiêu KPI (90%)</p>
+                  <strong className="metric-value">
+                    {reportMetrics.onTimeRateMonth}
+                  </strong>
+                  <p>Ngưỡng trễ cho phép: {settings.maxLateMinutes} phút</p>
                   <div className="metric-foot blue">
-                    <span className="tiny-dot" /> Duy trì ổn định
+                    <span className="tiny-dot" /> Tính từ nhật ký chấm công thực
                   </div>
                 </article>
                 <article className="metric-card">
                   <div className="metric-top">
-                    <span>Số giờ tăng ca (OT)</span>
+                    <span>Giờ làm vượt khung ca (OT)</span>
                     <span className="metric-icon orange">
                       <Icon name="sun" />
                     </span>
                   </div>
-                  <strong className="metric-value">64h</strong>
-                  <p>Tập trung ở Phòng Kỹ thuật</p>
+                  <strong className="metric-value">
+                    {reportMetrics.overtimeFormatted}
+                  </strong>
+                  <p>Tổng thời gian vượt giờ chuẩn của ca</p>
                   <div className="metric-foot orange">
-                    <span className="tiny-dot" /> Trong hạn mức ngân sách
+                    <span className="tiny-dot" /> Tự động đối chiếu theo ca
                   </div>
                 </article>
                 <article className="metric-card">
                   <div className="metric-top">
-                    <span>Tỷ lệ sử dụng phép năm</span>
+                    <span>Đơn nghỉ phép đã duyệt</span>
                     <span className="metric-icon purple">
                       <Icon name="file" />
                     </span>
                   </div>
-                  <strong className="metric-value">38%</strong>
-                  <p>Trung bình 4,5 ngày/nhân sự</p>
+                  <strong className="metric-value">
+                    {reportMetrics.approvedLeavesCount}/
+                    {reportMetrics.totalLeavesCount}
+                  </strong>
+                  <p>Tỷ lệ duyệt: {reportMetrics.leaveApprovalRate}</p>
                   <div className="metric-foot purple">
-                    <span className="tiny-dot" /> Cân đối giữa các phòng
+                    <span className="tiny-dot" /> Đồng bộ từ bảng leave_requests
                   </div>
                 </article>
               </section>
@@ -1711,32 +3176,41 @@ export default function DashboardPage() {
               <section className="panel" style={{ paddingBottom: 22 }}>
                 <PanelHeading
                   title="So sánh tỷ lệ chuyên cần theo phòng ban"
-                  subtitle="Dữ liệu tổng hợp theo thời gian thực"
+                  subtitle="Tính toán trực tiếp từ hồ sơ nhân sự và dữ liệu chấm công"
                 />
-                <div
-                  style={{
-                    padding: '20px 22px 0',
-                    display: 'grid',
-                    gap: 16,
-                  }}
-                >
-                  {departments.map((d) => (
-                    <div className="dept-progress-wrap" key={d.id}>
-                      <div className="dept-progress-label">
-                        <strong>
-                          {d.name} ({d.headcount} nhân sự)
-                        </strong>
-                        <strong>{d.attendanceRate}% đúng giờ</strong>
+                {computedDepartments.length === 0 ? (
+                  <div className="table-note">
+                    <Icon name="building" />
+                    Chưa có dữ liệu phòng ban để thống kê.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      padding: '20px 22px 0',
+                      display: 'grid',
+                      gap: 16,
+                    }}
+                  >
+                    {computedDepartments.map((d) => (
+                      <div className="dept-progress-wrap" key={d.id}>
+                        <div className="dept-progress-label">
+                          <strong>
+                            {d.name} ({d.actualHeadcount} nhân sự)
+                          </strong>
+                          <strong>{d.actualRate}% đúng giờ</strong>
+                        </div>
+                        <div className="dept-progress-bar">
+                          <div
+                            className="dept-progress-fill"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, d.actualRate))}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="dept-progress-bar">
-                        <div
-                          className="dept-progress-fill"
-                          style={{ width: `${d.attendanceRate}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -1746,30 +3220,58 @@ export default function DashboardPage() {
               <section className="panel">
                 <PanelHeading
                   title="Cấu hình không gian làm việc"
-                  subtitle="Thông tin chung và quy định chấm công tiêu chuẩn"
+                  subtitle="Lưu trữ trực tiếp vào bảng workspace_settings trên Supabase"
                 />
-                <form
-                  className="settings-body"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    setNotice('Đã lưu cấu hình hệ thống ShiftFlow thành công.')
-                  }}
-                >
+                <form className="settings-body" onSubmit={handleSaveSettings}>
                   <div className="settings-field">
                     <label>Tên không gian làm việc</label>
-                    <input defaultValue="ShiftFlow Enterprise Workspace" />
+                    <input
+                      value={settings.workspaceName}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          workspaceName: e.target.value,
+                        })
+                      }
+                      disabled={!isAdmin}
+                      required
+                    />
                   </div>
                   <div className="settings-field">
                     <label>Múi giờ hệ thống</label>
-                    <input defaultValue="Asia/Ho_Chi_Minh (GMT+7)" />
+                    <input
+                      value={settings.timezone}
+                      onChange={(e) =>
+                        setSettings({ ...settings, timezone: e.target.value })
+                      }
+                      disabled={!isAdmin}
+                      required
+                    />
                   </div>
                   <div className="settings-field">
                     <label>Thời gian cho phép trễ tối đa (Phút)</label>
-                    <input type="number" defaultValue="10" />
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={settings.maxLateMinutes}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          maxLateMinutes: Number(e.target.value),
+                        })
+                      }
+                      disabled={!isAdmin}
+                      required
+                    />
                   </div>
                   <div>
-                    <button type="submit" className="primary-button">
-                      Lưu thay đổi
+                    <button
+                      type="submit"
+                      className="primary-button"
+                      disabled={!isAdmin || isSubmitting}
+                    >
+                      {isSubmitting ? 'Đang lưu...' : 'Lưu thay đổi'}
                     </button>
                   </div>
                 </form>
@@ -1778,7 +3280,7 @@ export default function DashboardPage() {
               <section className="panel">
                 <PanelHeading
                   title="Tùy chọn thông báo & Tự động hóa"
-                  subtitle="Kiểm soát cảnh báo gửi về cho Quản trị viên"
+                  subtitle="Cấu hình được giữ nguyên khi tải lại trang hoặc đăng nhập lại"
                 />
                 <div className="settings-body">
                   <div className="toggle-row">
@@ -1790,8 +3292,11 @@ export default function DashboardPage() {
                     </div>
                     <button
                       type="button"
-                      className="switch-btn on"
-                      onClick={(e) => e.currentTarget.classList.toggle('on')}
+                      className={`switch-btn ${
+                        settings.notifyLeaveEmail ? 'on' : ''
+                      }`}
+                      aria-pressed={settings.notifyLeaveEmail}
+                      onClick={() => handleToggleSetting('notifyLeaveEmail')}
                     >
                       <i />
                     </button>
@@ -1799,12 +3304,18 @@ export default function DashboardPage() {
                   <div className="toggle-row">
                     <div>
                       <strong>Cảnh báo nhân sự đi trễ quá hạn mức</strong>
-                      <span>Hiển thị cảnh báo nổi bật nếu trễ quá 10 phút</span>
+                      <span>
+                        Tự động đánh dấu Đi trễ nếu vào ca sau{' '}
+                        {settings.maxLateMinutes} phút
+                      </span>
                     </div>
                     <button
                       type="button"
-                      className="switch-btn on"
-                      onClick={(e) => e.currentTarget.classList.toggle('on')}
+                      className={`switch-btn ${
+                        settings.alertLateThreshold ? 'on' : ''
+                      }`}
+                      aria-pressed={settings.alertLateThreshold}
+                      onClick={() => handleToggleSetting('alertLateThreshold')}
                     >
                       <i />
                     </button>
@@ -1846,7 +3357,8 @@ export default function DashboardPage() {
                 create: 'Tạo ca làm mới',
                 'add-employee': 'Thêm nhân viên mới',
                 'add-department': 'Thêm phòng ban mới',
-                'manual-checkin': 'Ghi nhận chấm công thủ công',
+                'manual-checkin': 'Ghi nhận Vào ca / Chấm công',
+                'create-leave': 'Tạo đơn xin nghỉ phép',
                 notifications: 'Thông báo hệ thống',
                 search: 'Tìm kiếm nhanh trong ShiftFlow',
                 profile: 'Thông tin tài khoản',
@@ -1854,7 +3366,7 @@ export default function DashboardPage() {
                 support: 'Trung tâm trợ giúp',
                 activity: 'Hoạt động gần đây',
               } as Record<string, string>
-            )[modal]
+            )[modal] || 'Thông tin'
           }
           onClose={() => setModal(null)}
         >
@@ -1886,19 +3398,23 @@ export default function DashboardPage() {
                 </label>
               </div>
               <label>
-                Số nhân viên được phân công
+                Số nhân viên định biên
                 <input
                   type="number"
                   name="count"
                   min="1"
-                  max="50"
+                  max="200"
                   defaultValue="6"
                   required
                 />
               </label>
-              <button className="primary-button" type="submit">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isSubmitting}
+              >
                 <Icon name="plus" />
-                Lưu ca làm
+                {isSubmitting ? 'Đang lưu...' : 'Lưu ca làm'}
               </button>
             </form>
           ) : modal === 'add-employee' ? (
@@ -1929,25 +3445,47 @@ export default function DashboardPage() {
                 <label>
                   Phòng ban
                   <select name="department" defaultValue="Phòng Kỹ thuật">
-                    <option value="Phòng Kỹ thuật">Phòng Kỹ thuật</option>
-                    <option value="Phòng Marketing">Phòng Marketing</option>
-                    <option value="Phòng Nhân sự">Phòng Nhân sự</option>
-                    <option value="Phòng Vận hành">Phòng Vận hành</option>
-                    <option value="Phòng Kinh doanh">Phòng Kinh doanh</option>
+                    {Array.from(
+                      new Set([
+                        'Phòng Kỹ thuật',
+                        'Phòng Marketing',
+                        'Phòng Nhân sự',
+                        'Phòng Vận hành',
+                        'Phòng Kinh doanh',
+                        ...departments.map((d) => d.name),
+                      ]),
+                    ).map((deptName) => (
+                      <option key={deptName} value={deptName}>
+                        {deptName}
+                      </option>
+                    ))}
                   </select>
                 </label>
               </div>
               <label>
                 Ca làm việc mặc định
                 <select name="shift" defaultValue="Ca sáng">
-                  <option value="Ca sáng">Ca sáng (08:00 – 12:00)</option>
-                  <option value="Ca chiều">Ca chiều (13:00 – 17:00)</option>
-                  <option value="Ca tối">Ca tối (18:00 – 22:00)</option>
+                  {(shifts.length > 0
+                    ? shifts
+                    : [
+                        { name: 'Ca sáng', start: '08:00', end: '12:00' },
+                        { name: 'Ca chiều', start: '13:00', end: '17:00' },
+                        { name: 'Ca tối', start: '18:00', end: '22:00' },
+                      ]
+                  ).map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.start} – {s.end})
+                    </option>
+                  ))}
                 </select>
               </label>
-              <button className="primary-button" type="submit">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isSubmitting}
+              >
                 <Icon name="plus" />
-                Thêm vào danh sách
+                {isSubmitting ? 'Đang lưu...' : 'Thêm vào danh sách'}
               </button>
             </form>
           ) : modal === 'add-department' ? (
@@ -1967,7 +3505,7 @@ export default function DashboardPage() {
                   <input name="manager" placeholder="Họ tên quản lý" required />
                 </label>
                 <label>
-                  Số lượng nhân sự
+                  Số lượng nhân sự định biên
                   <input
                     type="number"
                     name="headcount"
@@ -1977,47 +3515,203 @@ export default function DashboardPage() {
                   />
                 </label>
               </div>
-              <button className="primary-button" type="submit">
+              <label>
+                Các ca hoạt động chính
+                <input
+                  name="activeShifts"
+                  defaultValue="Ca sáng, Ca chiều"
+                  required
+                />
+              </label>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isSubmitting}
+              >
                 <Icon name="plus" />
-                Tạo phòng ban
+                {isSubmitting ? 'Đang tạo...' : 'Tạo phòng ban'}
               </button>
             </form>
           ) : modal === 'manual-checkin' ? (
             <form className="shift-form" onSubmit={handleManualCheckIn}>
               <label>
-                Tên nhân viên
-                <input
-                  name="name"
-                  placeholder="Nhập họ tên nhân viên"
+                Chọn nhân viên
+                <select
+                  name="employeeId"
+                  value={selectedCheckInEmpId}
+                  onChange={(e) => {
+                    const idVal = e.target.value
+                    setSelectedCheckInEmpId(idVal)
+                    const emp = employees.find(
+                      (item) => String(item.id) === idVal,
+                    )
+                    if (emp?.shift) setSelectedCheckInShift(emp.shift)
+                  }}
                   required
-                  autoFocus
-                />
+                >
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.code} – {emp.name} ({emp.department})
+                    </option>
+                  ))}
+                </select>
               </label>
               <div className="form-split">
                 <label>
-                  Phòng ban
-                  <select name="department" defaultValue="Phòng Kỹ thuật">
-                    <option value="Phòng Kỹ thuật">Phòng Kỹ thuật</option>
-                    <option value="Phòng Marketing">Phòng Marketing</option>
-                    <option value="Phòng Vận hành">Phòng Vận hành</option>
-                  </select>
+                  Ngày làm việc
+                  <input
+                    type="date"
+                    name="workDate"
+                    defaultValue={todayIso}
+                    required
+                  />
                 </label>
                 <label>
-                  Ca làm
-                  <select name="shift" defaultValue="Ca sáng">
-                    <option value="Ca sáng">Ca sáng</option>
-                    <option value="Ca chiều">Ca chiều</option>
-                    <option value="Ca tối">Ca tối</option>
+                  Ca làm việc
+                  <select
+                    name="shift"
+                    value={selectedCheckInShift}
+                    onChange={(e) => setSelectedCheckInShift(e.target.value)}
+                  >
+                    {(shifts.length > 0
+                      ? shifts
+                      : [
+                          { name: 'Ca sáng', start: '08:00', end: '12:00' },
+                          { name: 'Ca chiều', start: '13:00', end: '17:00' },
+                          { name: 'Ca tối', start: '18:00', end: '22:00' },
+                        ]
+                    ).map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name} ({s.start} – {s.end})
+                      </option>
+                    ))}
                   </select>
                 </label>
               </div>
+              <div className="form-split">
+                <label>
+                  Giờ vào ca thực tế
+                  <input
+                    type="time"
+                    name="checkIn"
+                    defaultValue={defaultTimeHHMM}
+                    required
+                  />
+                </label>
+                <label>
+                  Giờ tan ca (Để trống nếu đang làm)
+                  <input type="time" name="checkOut" />
+                </label>
+              </div>
               <label>
-                Giờ vào thực tế
-                <input type="time" name="checkIn" defaultValue="07:55" required />
+                Nghỉ giữa giờ (Phút)
+                <input
+                  type="number"
+                  name="breakMinutes"
+                  min="0"
+                  max="240"
+                  defaultValue="0"
+                />
               </label>
-              <button className="primary-button" type="submit">
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 16,
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flexDirection: 'row',
+                  }}
+                >
+                  <input type="checkbox" name="isOvernight" />
+                  Ca qua ngày hôm sau
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flexDirection: 'row',
+                  }}
+                >
+                  <input type="checkbox" name="isAbsent" />
+                  Đánh dấu Vắng mặt
+                </label>
+              </div>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isSubmitting || employees.length === 0}
+              >
                 <Icon name="check" />
-                Xác nhận chấm công
+                {isSubmitting ? 'Đang lưu...' : 'Lưu bản ghi chấm công'}
+              </button>
+            </form>
+          ) : modal === 'create-leave' ? (
+            <form className="shift-form" onSubmit={handleCreateLeaveRequest}>
+              <label>
+                Nhân viên xin nghỉ
+                <select
+                  name="employeeId"
+                  defaultValue={employees[0]?.id ?? ''}
+                  required
+                >
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.code} – {emp.name} ({emp.department})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="form-split">
+                <label>
+                  Loại đơn
+                  <select name="type" defaultValue="Nghỉ phép năm">
+                    <option value="Nghỉ phép năm">Nghỉ phép năm</option>
+                    <option value="Nghỉ việc riêng">Nghỉ việc riêng</option>
+                    <option value="Nghỉ ốm">Nghỉ ốm</option>
+                    <option value="Đổi ca làm việc">Đổi ca làm việc</option>
+                  </select>
+                </label>
+                <label>
+                  Số lượng ngày / ca
+                  <input
+                    name="daysCount"
+                    placeholder="Ví dụ: 2 ngày"
+                    defaultValue="1 ngày"
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                Khoảng thời gian nghỉ
+                <input
+                  name="dateRange"
+                  placeholder="Ví dụ: 20/10 – 21/10"
+                  required
+                />
+              </label>
+              <label>
+                Lý do cụ thể
+                <input
+                  name="reason"
+                  placeholder="Nhập lý do xin nghỉ phép hoặc đổi ca..."
+                  required
+                />
+              </label>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isSubmitting || employees.length === 0}
+              >
+                <Icon name="plus" />
+                {isSubmitting ? 'Đang gửi...' : 'Gửi đơn nghỉ phép'}
               </button>
             </form>
           ) : modal === 'search' ? (
@@ -2043,9 +3737,13 @@ export default function DashboardPage() {
                   <button
                     key={s}
                     onClick={() => {
-                      navigate(
-                        navigation.some((n) => n.label === s) ? s : 'Nhân viên',
-                      )
+                      const isNav = navigation.some((n) => n.label === s)
+                      if (isNav) {
+                        navigate(s)
+                      } else {
+                        setEmpSearch(s)
+                        navigate('Nhân viên')
+                      }
                       setModal(null)
                     }}
                   >
@@ -2058,9 +3756,9 @@ export default function DashboardPage() {
           ) : modal === 'notifications' || modal === 'activity' ? (
             <>
               <p className="modal-description">
-                Nhật ký hoạt động theo thời gian thực trong không gian làm việc.
+                Nhật ký hoạt động thực tế được ghi nhận từ cơ sở dữ liệu.
               </p>
-              <ActivityFeed />
+              <ActivityFeedList items={realActivities} nowMs={nowMs} />
             </>
           ) : modal === 'logout' ? (
             <>
@@ -2077,24 +3775,88 @@ export default function DashboardPage() {
             </>
           ) : modal === 'profile' ? (
             <div className="profile-detail">
-              <Avatar initials="MT" />
-              <h3>Nguyễn Minh Trí</h3>
-              <p>{userEmail} · ShiftFlow Workspace</p>
-              <span className="badge success">Phiên xác thực hợp lệ (Full Cloud DB)</span>
+              <Avatar initials={computeInitials(userName)} />
+              <h3>{userName}</h3>
+              <p>
+                {userEmail} · Vai trò:{' '}
+                <strong>{isAdmin ? 'Quản trị viên' : 'Nhân viên'}</strong>
+              </p>
+              <span className="badge success">
+                Bảo mật RLS & Xác thực hợp lệ
+              </span>
             </div>
           ) : (
             <div className="support-content">
               <p>Quản lý đội ngũ của bạn từ một không gian duy nhất.</p>
               <p>
-                <strong>Tạo ca làm:</strong> chọn “Tạo ca làm”, điền thời gian
-                và số nhân viên.
+                <strong>Vào ca & Tan ca:</strong> Chọn &ldquo;Vào ca / Chấm
+                công&rdquo; khi bắt đầu làm việc và bấm &ldquo;Tan ca&rdquo;
+                trực tiếp trên dòng chấm công khi kết thúc để tính giờ thực tế.
               </p>
               <p>
-                <strong>Duyệt nghỉ phép:</strong> chọn một đơn để xem chi tiết
-                hoặc bấm Duyệt trực tiếp tại bảng Đơn nghỉ phép.
+                <strong>Xuất báo cáo:</strong> Bấm &ldquo;Xuất báo cáo
+                CSV&rdquo; để tải tệp dữ liệu thực về máy tính.
               </p>
             </div>
           )}
+        </Modal>
+      )}
+
+      {checkoutTarget && (
+        <Modal
+          title={`Ghi nhận Tan ca: ${checkoutTarget.name}`}
+          onClose={() => setCheckoutTarget(null)}
+        >
+          <form className="shift-form" onSubmit={handleCheckOutSubmit}>
+            <p className="modal-description" style={{ margin: '0 0 8px' }}>
+              Ca làm: <strong>{checkoutTarget.shift}</strong> · Ngày:{' '}
+              <strong>{formatShortDate(checkoutTarget.workDate)}</strong> · Giờ
+              vào ca: <strong>{checkoutTarget.checkIn}</strong>
+            </p>
+            <div className="form-split">
+              <label>
+                Giờ tan ca thực tế
+                <input
+                  type="time"
+                  name="checkOut"
+                  defaultValue={defaultTimeHHMM}
+                  required
+                  autoFocus
+                />
+              </label>
+              <label>
+                Nghỉ giữa giờ (Phút)
+                <input
+                  type="number"
+                  name="breakMinutes"
+                  min="0"
+                  max="240"
+                  defaultValue={checkoutTarget.breakMinutes || 0}
+                  required
+                />
+              </label>
+            </div>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexDirection: 'row',
+                fontSize: 13,
+              }}
+            >
+              <input type="checkbox" name="isOvernight" />
+              Ca làm việc qua ngày hôm sau (Qua 00:00)
+            </label>
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={isSubmitting}
+            >
+              <Icon name="check" />
+              {isSubmitting ? 'Đang lưu...' : 'Xác nhận Tan ca & Tính giờ công'}
+            </button>
+          </form>
         </Modal>
       )}
 
@@ -2130,19 +3892,24 @@ export default function DashboardPage() {
               <dd>{selectedRequest.status}</dd>
             </div>
           </dl>
-          <div className="review-actions">
-            {['Từ chối', 'Đã duyệt'].map((status) => (
-              <button
-                key={status}
-                className={
-                  status === 'Đã duyệt' ? 'primary-button' : 'secondary-button'
-                }
-                onClick={() => updateRequestStatus(selectedRequest.id, status)}
-              >
-                {status === 'Đã duyệt' ? 'Duyệt đơn' : status}
-              </button>
-            ))}
-          </div>
+          {isAdmin && (
+            <div className="review-actions">
+              {['Từ chối', 'Đã duyệt'].map((status) => (
+                <button
+                  key={status}
+                  className={
+                    status === 'Đã duyệt'
+                      ? 'primary-button'
+                      : 'secondary-button'
+                  }
+                  disabled={isSubmitting}
+                  onClick={() => updateRequestStatus(selectedRequest.id, status)}
+                >
+                  {status === 'Đã duyệt' ? 'Duyệt đơn' : status}
+                </button>
+              ))}
+            </div>
+          )}
         </Modal>
       )}
     </div>
