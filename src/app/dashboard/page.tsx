@@ -198,40 +198,16 @@ const sampleAttendance = [
 ]
 
 type Shift = {
+  id?: number
   name: string
-  start: string
-  end: string
+  start_time?: string
+  end_time?: string
+  start?: string
+  end?: string
   count: number
   status: string
   icon: IconName
 }
-
-const initialShifts: Shift[] = [
-  {
-    name: 'Ca sáng',
-    start: '08:00',
-    end: '12:00',
-    count: 12,
-    status: 'Đang diễn ra',
-    icon: 'sun',
-  },
-  {
-    name: 'Ca chiều',
-    start: '13:00',
-    end: '17:00',
-    count: 8,
-    status: 'Sắp bắt đầu',
-    icon: 'sun',
-  },
-  {
-    name: 'Ca tối',
-    start: '18:00',
-    end: '22:00',
-    count: 4,
-    status: 'Sắp bắt đầu',
-    icon: 'moon',
-  },
-]
 
 type Employee = {
   id: number
@@ -246,81 +222,6 @@ type Employee = {
   tone: string
 }
 
-const initialEmployees: Employee[] = [
-  {
-    id: 1,
-    code: 'SF-001',
-    name: 'Nguyễn Minh Anh',
-    initials: 'MA',
-    email: 'minhanh@shiftflow.com',
-    role: 'Trưởng nhóm nội dung',
-    department: 'Phòng Marketing',
-    shift: 'Ca sáng',
-    status: 'Đang hoạt động',
-    tone: 'peach',
-  },
-  {
-    id: 2,
-    code: 'SF-002',
-    name: 'Trần Hoàng Nam',
-    initials: 'HN',
-    email: 'hoangnam@shiftflow.com',
-    role: 'Kỹ sư Frontend',
-    department: 'Phòng Kỹ thuật',
-    shift: 'Ca sáng',
-    status: 'Đang hoạt động',
-    tone: 'lavender',
-  },
-  {
-    id: 3,
-    code: 'SF-003',
-    name: 'Lê Thu Hà',
-    initials: 'TH',
-    email: 'thuha@shiftflow.com',
-    role: 'Chuyên viên Tuyển dụng',
-    department: 'Phòng Nhân sự',
-    shift: 'Ca chiều',
-    status: 'Đang hoạt động',
-    tone: 'mint',
-  },
-  {
-    id: 4,
-    code: 'SF-004',
-    name: 'Phạm Đức Long',
-    initials: 'ĐL',
-    email: 'duclong@shiftflow.com',
-    role: 'Điều phối viên Ca trực',
-    department: 'Phòng Vận hành',
-    shift: 'Ca sáng',
-    status: 'Đang hoạt động',
-    tone: 'peach',
-  },
-  {
-    id: 5,
-    code: 'SF-005',
-    name: 'Võ Hoàng Yến',
-    initials: 'HY',
-    email: 'hoangyen@shiftflow.com',
-    role: 'Chuyên viên Tư vấn',
-    department: 'Phòng Kinh doanh',
-    shift: 'Ca tối',
-    status: 'Nghỉ phép',
-    tone: 'lavender',
-  },
-  {
-    id: 6,
-    code: 'SF-006',
-    name: 'Đặng Quốc Khánh',
-    initials: 'QK',
-    email: 'quockhanh@shiftflow.com',
-    role: 'Kỹ sư Hệ thống',
-    department: 'Phòng Kỹ thuật',
-    shift: 'Ca chiều',
-    status: 'Đang hoạt động',
-    tone: 'mint',
-  },
-]
-
 type Department = {
   id: number
   name: string
@@ -330,54 +231,6 @@ type Department = {
   activeShifts: string
   tone: string
 }
-
-const initialDepartments: Department[] = [
-  {
-    id: 1,
-    name: 'Phòng Kỹ thuật',
-    manager: 'Trần Hoàng Nam',
-    headcount: 8,
-    attendanceRate: 96,
-    activeShifts: 'Ca sáng, Ca chiều',
-    tone: 'teal',
-  },
-  {
-    id: 2,
-    name: 'Phòng Marketing',
-    manager: 'Nguyễn Minh Anh',
-    headcount: 5,
-    attendanceRate: 92,
-    activeShifts: 'Ca sáng',
-    tone: 'blue',
-  },
-  {
-    id: 3,
-    name: 'Phòng Vận hành',
-    manager: 'Phạm Đức Long',
-    headcount: 5,
-    attendanceRate: 88,
-    activeShifts: 'Ca sáng, Ca chiều, Ca tối',
-    tone: 'orange',
-  },
-  {
-    id: 4,
-    name: 'Phòng Nhân sự',
-    manager: 'Lê Thu Hà',
-    headcount: 3,
-    attendanceRate: 100,
-    activeShifts: 'Ca sáng, Ca chiều',
-    tone: 'purple',
-  },
-  {
-    id: 5,
-    name: 'Phòng Kinh doanh',
-    manager: 'Võ Hoàng Yến',
-    headcount: 3,
-    attendanceRate: 85,
-    activeShifts: 'Ca chiều, Ca tối',
-    tone: 'teal',
-  },
-]
 
 type AttendanceRecord = {
   id: number
@@ -390,6 +243,21 @@ type AttendanceRecord = {
   totalHours: string
   status: string
   tone: string
+}
+
+type LeaveRequest = {
+  id: number
+  name: string
+  initials: string
+  department: string
+  type: string
+  reason: string
+  date_range?: string
+  date?: string
+  days_count?: string
+  days?: string
+  tone: string
+  status: string
 }
 
 const initialAttendanceLogs: AttendanceRecord[] = [
@@ -407,8 +275,8 @@ const initialAttendanceLogs: AttendanceRecord[] = [
   },
   {
     id: 2,
-    name: 'Trần Hoàng Nam',
-    initials: 'HN',
+    name: 'Lê Quốc Bảo Ân',
+    initials: 'BA',
     department: 'Phòng Kỹ thuật',
     shift: 'Ca sáng',
     checkIn: '07:58',
@@ -419,8 +287,8 @@ const initialAttendanceLogs: AttendanceRecord[] = [
   },
   {
     id: 3,
-    name: 'Nguyễn Minh Anh',
-    initials: 'MA',
+    name: 'Nguyễn Quốc Huy',
+    initials: 'QH',
     department: 'Phòng Marketing',
     shift: 'Ca sáng',
     checkIn: '08:17',
@@ -443,8 +311,8 @@ const initialAttendanceLogs: AttendanceRecord[] = [
   },
   {
     id: 5,
-    name: 'Đặng Quốc Khánh',
-    initials: 'QK',
+    name: 'Nguyễn Minh Trí',
+    initials: 'MT',
     department: 'Phòng Kỹ thuật',
     shift: 'Ca chiều',
     checkIn: '13:00',
@@ -464,69 +332,6 @@ const initialAttendanceLogs: AttendanceRecord[] = [
     totalHours: '0h 00m',
     status: 'Vắng mặt',
     tone: 'lavender',
-  },
-]
-
-const initialRequests = [
-  {
-    id: 1,
-    name: 'Nguyễn Minh Anh',
-    initials: 'MA',
-    department: 'Phòng Marketing',
-    type: 'Nghỉ phép năm',
-    reason: 'Giải quyết công việc gia đình tại quê',
-    date: '16/10 – 17/10',
-    days: '2 ngày',
-    tone: 'peach',
-    status: 'Chờ duyệt',
-  },
-  {
-    id: 2,
-    name: 'Trần Hoàng Nam',
-    initials: 'HN',
-    department: 'Phòng Kỹ thuật',
-    type: 'Nghỉ việc riêng',
-    reason: 'Khám sức khỏe định kỳ',
-    date: '17/10',
-    days: '1 ngày',
-    tone: 'lavender',
-    status: 'Chờ duyệt',
-  },
-  {
-    id: 3,
-    name: 'Lê Thu Hà',
-    initials: 'TH',
-    department: 'Phòng Nhân sự',
-    type: 'Nghỉ phép năm',
-    reason: 'Tham dự lễ tốt nghiệp của em gái',
-    date: '18/10 – 19/10',
-    days: '2 ngày',
-    tone: 'mint',
-    status: 'Chờ duyệt',
-  },
-  {
-    id: 4,
-    name: 'Phạm Đức Long',
-    initials: 'ĐL',
-    department: 'Phòng Vận hành',
-    type: 'Đổi ca làm việc',
-    reason: 'Đổi từ Ca tối sang Ca sáng ngày 20/10',
-    date: '20/10',
-    days: '1 ca',
-    tone: 'peach',
-    status: 'Đã duyệt',
-  },
-  {
-    id: 5,
-    name: 'Võ Hoàng Yến',
-    initials: 'HY',
-    department: 'Phòng Kinh doanh',
-    type: 'Nghỉ ốm',
-    reason: 'Cảm sốt cần nghỉ ngơi theo chỉ định bác sĩ',
-    date: '14/10',
-    days: '1 ngày',
-    tone: 'lavender',
-    status: 'Chờ duyệt',
   },
 ]
 
@@ -610,7 +415,7 @@ function ActivityFeed() {
         {
           icon: 'file' as IconName,
           tone: 'orange',
-          name: 'Nguyễn Minh Anh',
+          name: 'Nguyễn Quốc Huy',
           text: 'gửi đơn xin nghỉ phép.',
           time: '18 phút trước',
           detail: 'Nghỉ phép năm · 2 ngày',
@@ -651,11 +456,11 @@ export default function DashboardPage() {
   const [active, setActive] = useState('Tổng quan')
   const [modal, setModal] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
-  const [shifts, setShifts] = useState(initialShifts)
-  const [employees, setEmployees] = useState(initialEmployees)
-  const [departments, setDepartments] = useState(initialDepartments)
+  const [shifts, setShifts] = useState<Shift[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [attendanceLogs, setAttendanceLogs] = useState(initialAttendanceLogs)
-  const [requests, setRequests] = useState(initialRequests)
+  const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [review, setReview] = useState<number | null>(null)
   const [period, setPeriod] = useState('week')
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -664,20 +469,83 @@ export default function DashboardPage() {
   const [empDeptFilter, setEmpDeptFilter] = useState('Tất cả')
   const [attFilter, setAttFilter] = useState('Tất cả')
   const [leaveFilter, setLeaveFilter] = useState('Tất cả')
-  const [userEmail, setUserEmail] = useState('admin@shiftflow.com')
+  const [userEmail, setUserEmail] = useState('minhtri@shiftflow.com')
   const [currentDateString, setCurrentDateString] = useState('')
 
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    async function loadUser() {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user?.email) {
-        setUserEmail(user.email)
-      }
+  // Hàm tải dữ liệu toàn diện từ Supabase
+  const fetchSupabaseData = async () => {
+    const supabase = createClient()
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user?.email) {
+      setUserEmail(user.email)
     }
-    loadUser()
+
+    const { data: empData } = await supabase.from('employees').select('*')
+    if (empData) setEmployees(empData)
+
+    const { data: deptData } = await supabase.from('departments').select('*')
+    if (deptData) setDepartments(deptData)
+
+    const { data: shiftData } = await supabase.from('shifts').select('*')
+    if (shiftData) {
+      setShifts(
+        shiftData.map((s) => ({
+          ...s,
+          start: s.start_time || s.start || '08:00',
+          end: s.end_time || s.end || '12:00',
+        })),
+      )
+    }
+
+    const { data: leaveData } = await supabase.from('leave_requests').select('*')
+    if (leaveData) {
+      setRequests(
+        leaveData.map((r) => ({
+          ...r,
+          date: r.date_range || r.date || '16/10',
+          days: r.days_count || r.days || '1 ngày',
+        })),
+      )
+    }
+  }
+
+  // Khởi tạo dữ liệu và Đăng ký Realtime Subscriptions
+  useEffect(() => {
+    fetchSupabaseData()
+
+    const supabase = createClient()
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employees' },
+        () => fetchSupabaseData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'departments' },
+        () => fetchSupabaseData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shifts' },
+        () => fetchSupabaseData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_requests' },
+        () => {
+          fetchSupabaseData()
+          setNotice('Cập nhật trạng thái đơn nghỉ phép thời gian thực!')
+        },
+      )
+      .subscribe()
 
     const now = new Date()
     const formatted = new Intl.DateTimeFormat('vi-VN', {
@@ -686,8 +554,11 @@ export default function DashboardPage() {
       month: 'long',
       year: 'numeric',
     }).format(now)
-    // Viết hoa chữ cái đầu cho chuẩn tiếng Việt
     setCurrentDateString(formatted.charAt(0).toUpperCase() + formatted.slice(1))
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   useEffect(() => {
@@ -714,75 +585,105 @@ export default function DashboardPage() {
     setDrawer(false)
   }
 
-  function createShift(e: FormEvent<HTMLFormElement>) {
+  async function createShift(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const data = new FormData(e.currentTarget)
+    const name = String(data.get('name'))
     const start = String(data.get('start'))
     const end = String(data.get('end'))
+    const count = Number(data.get('count'))
+
     if (end <= start) {
       setNotice('Giờ kết thúc phải sau giờ bắt đầu.')
       return
     }
-    setShifts([
-      ...shifts,
+
+    const supabase = createClient()
+    const { error } = await supabase.from('shifts').insert([
       {
-        name: String(data.get('name')),
-        start,
-        end,
-        count: Number(data.get('count')),
+        name,
+        start_time: start,
+        end_time: end,
+        count,
         status: 'Sắp bắt đầu',
         icon: 'clock',
       },
     ])
-    setModal(null)
-    setNotice('Đã thêm ca làm việc mới thành công.')
+
+    if (!error) {
+      setModal(null)
+      setNotice('Đã thêm ca làm việc mới vào Supabase thành công.')
+    } else {
+      setNotice('Lỗi khi lưu ca làm xuống Supabase.')
+    }
   }
 
-  function handleAddEmployee(e: FormEvent<HTMLFormElement>) {
+  async function handleAddEmployee(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const data = new FormData(e.currentTarget)
     const name = String(data.get('name')).trim()
+    const email = String(data.get('email'))
+    const role = String(data.get('role'))
+    const department = String(data.get('department'))
+    const shift = String(data.get('shift'))
+
     const words = name.split(' ')
     const initials =
       words.length >= 2
         ? `${words[words.length - 2][0]}${words[words.length - 1][0]}`.toUpperCase()
         : name.slice(0, 2).toUpperCase()
 
-    const newEmp: Employee = {
-      id: Date.now(),
-      code: `SF-00${employees.length + 1}`,
-      name,
-      initials,
-      email: String(data.get('email')),
-      role: String(data.get('role')),
-      department: String(data.get('department')),
-      shift: String(data.get('shift')),
-      status: 'Đang hoạt động',
-      tone: ['peach', 'lavender', 'mint'][employees.length % 3],
+    const code = `SF-00${employees.length + 1}`
+    const tone = ['peach', 'lavender', 'mint'][employees.length % 3]
+
+    const supabase = createClient()
+    const { error } = await supabase.from('employees').insert([
+      {
+        code,
+        name,
+        initials,
+        email,
+        role,
+        department,
+        shift,
+        status: 'Đang hoạt động',
+        tone,
+      },
+    ])
+
+    if (!error) {
+      setModal(null)
+      setNotice(`Đã thêm nhân viên ${name} vào Supabase thành công.`)
+    } else {
+      setNotice('Lỗi khi thêm nhân viên.')
     }
-    setEmployees([newEmp, ...employees])
-    setModal(null)
-    setNotice(`Đã thêm nhân viên ${name} vào hệ thống.`)
   }
 
-  function handleAddDepartment(e: FormEvent<HTMLFormElement>) {
+  async function handleAddDepartment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const data = new FormData(e.currentTarget)
     const name = String(data.get('name'))
-    setDepartments([
-      ...departments,
+    const manager = String(data.get('manager'))
+    const headcount = Number(data.get('headcount'))
+
+    const supabase = createClient()
+    const { error } = await supabase.from('departments').insert([
       {
-        id: Date.now(),
         name,
-        manager: String(data.get('manager')),
-        headcount: Number(data.get('headcount')),
-        attendanceRate: 100,
-        activeShifts: 'Ca sáng, Ca chiều',
+        manager,
+        headcount,
+        attendance_rate: 100,
+        active_shifts: 'Ca sáng, Ca chiều',
         tone: 'teal',
       },
     ])
-    setModal(null)
-    setNotice(`Đã tạo ${name} thành công.`)
+
+    if (!error) {
+      setModal(null)
+      setNotice(`Đã tạo ${name} thành công trên Supabase.`)
+    } else {
+      setNotice('Lỗi khi tạo phòng ban.')
+    }
   }
 
   function handleManualCheckIn(e: FormEvent<HTMLFormElement>) {
@@ -813,10 +714,20 @@ export default function DashboardPage() {
     setNotice(`Đã ghi nhận chấm công cho ${name}.`)
   }
 
-  function updateRequestStatus(id: number, status: string) {
-    setRequests(requests.map((r) => (r.id === id ? { ...r, status } : r)))
-    setReview(null)
-    setNotice(`Đã cập nhật trạng thái đơn: ${status}.`)
+  async function updateRequestStatus(id: number, status: string) {
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('leave_requests')
+      .update({ status })
+      .eq('id', id)
+
+    if (!error) {
+      setRequests(requests.map((r) => (r.id === id ? { ...r, status } : r)))
+      setReview(null)
+      setNotice(`Đã cập nhật trạng thái đơn: ${status}.`)
+    } else {
+      setNotice('Lỗi khi cập nhật trạng thái đơn trên Supabase.')
+    }
   }
 
   const pendingCount = requests.filter((r) => r.status === 'Chờ duyệt').length
@@ -825,7 +736,7 @@ export default function DashboardPage() {
   const metrics = [
     {
       label: 'Tổng nhân sự',
-      value: String(employees.length + 18),
+      value: String(employees.length > 0 ? employees.length : 6),
       description: 'Nhân viên đang hoạt động',
       icon: 'users' as IconName,
       tone: 'teal',
@@ -930,9 +841,9 @@ export default function DashboardPage() {
             <span>Cài đặt</span>
           </button>
           <div className="sidebar-profile">
-            <Avatar initials="AD" />
+            <Avatar initials="MT" />
             <div>
-              <strong>Quản trị viên</strong>
+              <strong>Nguyễn Minh Trí</strong>
               <span>{userEmail}</span>
             </div>
             <button
@@ -985,8 +896,8 @@ export default function DashboardPage() {
             </button>
             <span className="header-divider" />
             <button className="header-user" onClick={() => setModal('profile')}>
-              <Avatar initials="AD" />
-              <span>{userEmail.split('@')[0]}</span>
+              <Avatar initials="MT" />
+              <span>Minh Trí</span>
               <Icon name="chevron" />
             </button>
           </div>
@@ -996,7 +907,7 @@ export default function DashboardPage() {
           <div className="page-heading">
             <div>
               <div className="page-eyebrow">
-                <span /> KHÔNG GIAN QUẢN TRỊ
+                <span /> KHÔNG GIAN QUẢN TRỊ (REALTIME DATABASE CONNECTED)
               </div>
               <h1>{active}</h1>
               <p>
@@ -1055,7 +966,7 @@ export default function DashboardPage() {
                 </button>
               ) : (
                 <>
-                  <span className="demo-indicator">Hệ thống trực tuyến</span>
+                  <span className="demo-indicator">Cloud DB Sync</span>
                   <button
                     className="primary-button"
                     onClick={() => setModal('create')}
@@ -1277,15 +1188,9 @@ export default function DashboardPage() {
                           </p>
                           <div className="shift-employees">
                             <div className="avatar-stack">
-                              <Avatar
-                                initials={i === 0 ? 'MA' : 'HN'}
-                                tone="peach"
-                              />
-                              <Avatar initials="TH" tone="lavender" />
-                              <Avatar
-                                initials={`+${Math.max(1, shift.count - 2)}`}
-                                tone="mint"
-                              />
+                              <Avatar initials="QH" tone="peach" />
+                              <Avatar initials="BA" tone="lavender" />
+                              <Avatar initials="MT" tone="mint" />
                             </div>
                             <span>{shift.count} nhân viên</span>
                           </div>
@@ -1852,22 +1757,15 @@ export default function DashboardPage() {
                 >
                   <div className="settings-field">
                     <label>Tên không gian làm việc</label>
-                    <input
-                      defaultValue="ShiftFlow Enterprise Workspace"
-                    />
+                    <input defaultValue="ShiftFlow Enterprise Workspace" />
                   </div>
                   <div className="settings-field">
                     <label>Múi giờ hệ thống</label>
-                    <input
-                      defaultValue="Asia/Ho_Chi_Minh (GMT+7)"
-                    />
+                    <input defaultValue="Asia/Ho_Chi_Minh (GMT+7)" />
                   </div>
                   <div className="settings-field">
                     <label>Thời gian cho phép trễ tối đa (Phút)</label>
-                    <input
-                      type="number"
-                      defaultValue="10"
-                    />
+                    <input type="number" defaultValue="10" />
                   </div>
                   <div>
                     <button type="submit" className="primary-button">
@@ -1893,9 +1791,7 @@ export default function DashboardPage() {
                     <button
                       type="button"
                       className="switch-btn on"
-                      onClick={(e) =>
-                        e.currentTarget.classList.toggle('on')
-                      }
+                      onClick={(e) => e.currentTarget.classList.toggle('on')}
                     >
                       <i />
                     </button>
@@ -1903,16 +1799,12 @@ export default function DashboardPage() {
                   <div className="toggle-row">
                     <div>
                       <strong>Cảnh báo nhân sự đi trễ quá hạn mức</strong>
-                      <span>
-                        Hiển thị cảnh báo nổi bật nếu trễ quá 10 phút
-                      </span>
+                      <span>Hiển thị cảnh báo nổi bật nếu trễ quá 10 phút</span>
                     </div>
                     <button
                       type="button"
                       className="switch-btn on"
-                      onClick={(e) =>
-                        e.currentTarget.classList.toggle('on')
-                      }
+                      onClick={(e) => e.currentTarget.classList.toggle('on')}
                     >
                       <i />
                     </button>
@@ -2032,11 +1924,7 @@ export default function DashboardPage() {
               <div className="form-split">
                 <label>
                   Chức vụ
-                  <input
-                    name="role"
-                    placeholder="Chuyên viên..."
-                    required
-                  />
+                  <input name="role" placeholder="Chuyên viên..." required />
                 </label>
                 <label>
                   Phòng ban
@@ -2076,11 +1964,7 @@ export default function DashboardPage() {
               <div className="form-split">
                 <label>
                   Trưởng bộ phận
-                  <input
-                    name="manager"
-                    placeholder="Họ tên quản lý"
-                    required
-                  />
+                  <input name="manager" placeholder="Họ tên quản lý" required />
                 </label>
                 <label>
                   Số lượng nhân sự
@@ -2193,10 +2077,10 @@ export default function DashboardPage() {
             </>
           ) : modal === 'profile' ? (
             <div className="profile-detail">
-              <Avatar initials="AD" />
-              <h3>Quản trị viên</h3>
+              <Avatar initials="MT" />
+              <h3>Nguyễn Minh Trí</h3>
               <p>{userEmail} · ShiftFlow Workspace</p>
-              <span className="badge success">Phiên xác thực hợp lệ</span>
+              <span className="badge success">Phiên xác thực hợp lệ (Full Cloud DB)</span>
             </div>
           ) : (
             <div className="support-content">
@@ -2238,7 +2122,7 @@ export default function DashboardPage() {
             <div>
               <dt>Thời gian</dt>
               <dd>
-                {selectedRequest.date}/2026 · {selectedRequest.days}
+                {selectedRequest.date} · {selectedRequest.days}
               </dd>
             </div>
             <div>
